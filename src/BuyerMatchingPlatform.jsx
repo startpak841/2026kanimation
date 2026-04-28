@@ -3299,6 +3299,8 @@ function BuyersTab({state, fullState, update, project, readOnly}){
         '관심권역':'interestedRegions','관심 권역':'interestedRegions','선호권역':'interestedRegions','선호 권역':'interestedRegions','Interested Regions':'interestedRegions','interestedRegions':'interestedRegions','Regions':'interestedRegions','regions':'interestedRegions','권역':'interestedRegions',
         '주요 사업 요약':'businessSummary','주요사업요약':'businessSummary','사업요약':'businessSummary','Business Summary':'businessSummary','Summary':'businessSummary',
         '상태':'invitationStatus','초청상태':'invitationStatus','invitationStatus':'invitationStatus',
+        // 피칭쇼케이스 참석여부 (참가사가 별도로 진행하는 IP 피칭 행사)
+        '피칭쇼케이스':'pitchingShowcase','피칭 쇼케이스':'pitchingShowcase','피칭쇼케이스 참석':'pitchingShowcase','피칭쇼케이스 참석여부':'pitchingShowcase','피칭':'pitchingShowcase','Pitching Showcase':'pitchingShowcase','pitchingShowcase':'pitchingShowcase','Pitching':'pitchingShowcase','쇼케이스':'pitchingShowcase','Showcase':'pitchingShowcase',
       };
 
       // 카테고리 컬럼 감지 매핑 — 헤더 정규화(공백·줄바꿈·특수문자 제거 + 소문자) 후 BUYER_CATEGORIES로 변환
@@ -3454,6 +3456,23 @@ function BuyersTab({state, fullState, update, project, readOnly}){
         }
         if (!o.invitationStatus) o.invitationStatus = null;
         if (!o.preferredDates) o.preferredDates = [];
+
+        // 피칭쇼케이스 값 정규화 — 다양한 표현을 표준 3가지로 통합
+        if (o.pitchingShowcase) {
+          const v = String(o.pitchingShowcase).trim().toLowerCase();
+          if (['참석','참가','o','y','yes','attend','attending','o','참석함','o표시','참석합니다','참여','참여함'].some(k => v === k || v.includes(k))) {
+            o.pitchingShowcase = '참석';
+          } else if (['불참','x','n','no','not attend','decline','x','참석안함','불참석','참여안함'].some(k => v === k || v.includes(k))) {
+            o.pitchingShowcase = '불참';
+          } else if (['미정','tbd','pending','검토중','확인중','?'].some(k => v === k || v.includes(k))) {
+            o.pitchingShowcase = '미정';
+          } else {
+            // 그 외 값은 원본 유지 (혹시 모를 케이스)
+            o.pitchingShowcase = String(o.pitchingShowcase).trim();
+          }
+        } else {
+          o.pitchingShowcase = '';  // 명시적 빈 값 (CSV에서 빈 칸이거나 컬럼 자체가 없을 때)
+        }
         return o;
       });
 
@@ -3491,6 +3510,7 @@ function BuyersTab({state, fullState, update, project, readOnly}){
       '주요 사업 요약', '규모', '관심품목',
       '관심장르\n(쉼표구분)', '관심포맷\n(쉼표구분)', '관심연령\n(쉼표구분)',
       '관심권역\n(쉼표구분 · EU, NA, Global 등)',
+      '피칭쇼케이스\n(참석/불참/미정)',
       '초청상태',
     ];
     // 샘플 3개 — 다양한 카테고리 조합 시연
@@ -3499,18 +3519,21 @@ function BuyersTab({state, fullState, update, project, readOnly}){
       '공영방송 + 자체 OTT 플랫폼 · 키즈 · 애니메이션 편성', '대기업', '시리즈 52x11′',
       '액션/어드벤처, 코미디, 판타지', 'TV 시리즈, 디지털 / 숏폼', '키즈 (5-8), 패밀리 (All-Ages), 틴 (9-14)',
       'EU, NA',
+      '참석',
       ''];
     const sample2 = ['Japan', 'Sample Animation Studio', 'Yuki Tanaka', 'Producer', '+81-3-0000-0000', 'tanaka@sample.jp',
       '', '', '',  'O', 'O', '', '', '', '', '', '', '',
       '3D CG 애니메이션 스튜디오 · 공동제작 경험 다수', '중견', '극장판·시리즈 공동제작',
       '액션/어드벤처, SF, 판타지', '장편 극장판, TV 시리즈', '틴 (9-14), YA (15-18)',
       'AS, Global',
+      '미정',
       ''];
     const sample3 = ['USA', 'Sample Licensee + Merchandising', 'John Doe', 'VP Licensing', '+1-310-555-0100', 'john@sample.com',
       '', '', '',  '', '', '', '', '', 'O', '', 'O', '',
       '완구·퍼블리싱·MD 종합 라이선싱', '대기업', '완구·출판·어패럴',
       '코미디, 판타지', 'IP 라이선싱', '유아 (0-4), 키즈 (5-8), 패밀리 (All-Ages)',
       'NA',
+      '불참',
       ''];
     const aoa = [headers, sample1, sample2, sample3];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -3521,6 +3544,7 @@ function BuyersTab({state, fullState, update, project, readOnly}){
       {wch:12}, {wch:14}, {wch:14}, {wch:14}, {wch:12}, {wch:10},
       {wch:40}, {wch:10}, {wch:24},
       {wch:26}, {wch:22}, {wch:28}, {wch:24},
+      {wch:14},
       {wch:12},
     ];
     // 헤더 행 높이 (줄바꿈 수용)
@@ -3808,7 +3832,7 @@ function BuyersTab({state, fullState, update, project, readOnly}){
                 })}
               </div>
             </div>
-            <div style={{gridColumn:'1 / -1'}}>
+            <div>
               <label className="label">초청 상태</label>
               <select className="select" value={form.invitationStatus||''} onChange={e=>setForm({...form, invitationStatus:e.target.value||null})}>
                 <option value="">미발송</option>
@@ -3816,6 +3840,16 @@ function BuyersTab({state, fullState, update, project, readOnly}){
                 <option value="pending">회신대기</option>
                 <option value="accepted">참가확정</option>
                 <option value="declined">참가불가</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="label">피칭쇼케이스 참석여부</label>
+              <select className="select" value={form.pitchingShowcase||''} onChange={e=>setForm({...form, pitchingShowcase:e.target.value})}>
+                <option value="">미입력</option>
+                <option value="참석">참석</option>
+                <option value="불참">불참</option>
+                <option value="미정">미정</option>
               </select>
             </div>
 
@@ -4524,6 +4558,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
           invitationStatus: 'accepted',
           preferredDates: [modalData.date],
           source: 'admin_added',
+          pitchingShowcase: '',  // 비즈니스 미팅 스케줄로 등록된 바이어는 피칭쇼케이스 빈 값
         };
         buyers = [...s.buyers, newBuyer];
       } else {
@@ -6231,6 +6266,7 @@ function BuyerDetailModal({buyer, fullState, onClose, onEdit}){
         <DetailField label="이메일" value={b.email} mono/>
         <DetailField label="연락처" value={b.phone} mono/>
         <DetailField label="초청 상태" value={statusLabel}/>
+        <DetailField label="피칭쇼케이스" value={b.pitchingShowcase || '—'}/>
         <DetailField label="희망 미팅일" value={(b.preferredDates || []).join(' · ')}/>
         <div style={{gridColumn:'1 / -1'}}>
           <DetailField label="관심 품목 / 주요 사업" value={b.interestedProducts} multiline/>
@@ -6825,13 +6861,14 @@ function RsvpTab({state, fullState, update, project, readOnly}){
                 <th>회사명 / 담당자</th>
                 <th style={{width:90}}>국가</th>
                 <th style={{width:260}}>선호 콘텐츠</th>
+                <th style={{width:110}}>피칭쇼케이스</th>
                 <th>희망 미팅일</th>
                 <th style={{width:130}}>액션</th>
               </tr>
             </thead>
             <tbody>
               {respondedBuyers.length === 0 && (
-                <tr><td colSpan={7} style={{textAlign:'center', padding:48, color:'var(--muted)'}}>
+                <tr><td colSpan={8} style={{textAlign:'center', padding:48, color:'var(--muted)'}}>
                   RSVP 회신이 접수된 바이어가 없습니다.<br/>
                   <span style={{fontSize:12, color:'var(--muted-2)'}}>
                     "초청 &amp; 회신" 탭에서 바이어 초청을 발송하거나 구글폼 응답을 수동 반영하세요.
@@ -6842,6 +6879,8 @@ function RsvpTab({state, fullState, update, project, readOnly}){
                 const hasMeeting = fullState.meetings.some(m => m.buyerId === b.id);
                 const isExhibitorAdded = b.source === 'exhibitor_added';
                 const isGoogleForm = b.source === 'google_form';
+                const isAdminAdded = b.source === 'admin_added';  // 비즈니스 미팅 스케줄로 등록
+                const isManualRsvp = b.source === 'manual_rsvp';  // RSVP 수동 등록
                 return (
                   <tr key={b.id}>
                     <td><ProjectBadge project={b.project}/></td>
@@ -6857,7 +6896,15 @@ function RsvpTab({state, fullState, update, project, readOnly}){
                         </div>
                         {isGoogleForm ? (
                           <span style={{display:'inline-flex', alignItems:'center', gap:4, padding:'2px 8px', fontSize:9.5, fontWeight:700, background:'#2563EB', color:'#fff', borderRadius:3, letterSpacing:'0.05em'}}>
-                            <FileSpreadsheet size={9}/>구글폼 자동수집
+                            <FileSpreadsheet size={9}/>CSV 업로드
+                          </span>
+                        ) : isAdminAdded ? (
+                          <span style={{display:'inline-flex', alignItems:'center', gap:4, padding:'2px 8px', fontSize:9.5, fontWeight:700, background:'#F59E0B', color:'#fff', borderRadius:3, letterSpacing:'0.05em'}}>
+                            <Calendar size={9}/>미팅 등록
+                          </span>
+                        ) : isManualRsvp ? (
+                          <span style={{display:'inline-flex', alignItems:'center', gap:4, padding:'2px 8px', fontSize:9.5, fontWeight:700, background:'#7C3AED', color:'#fff', borderRadius:3, letterSpacing:'0.05em'}}>
+                            <Plus size={9}/>RSVP 수동
                           </span>
                         ) : isExhibitorAdded ? (
                           <span style={{display:'inline-flex', alignItems:'center', gap:4, padding:'2px 8px', fontSize:9.5, fontWeight:700, background:'#059669', color:'#fff', borderRadius:3, letterSpacing:'0.05em'}}>
@@ -6865,7 +6912,7 @@ function RsvpTab({state, fullState, update, project, readOnly}){
                           </span>
                         ) : (
                           <span style={{display:'inline-flex', alignItems:'center', gap:4, padding:'2px 8px', fontSize:9.5, fontWeight:700, background:'var(--ivory-2)', color:'var(--muted)', border:'1px solid var(--line)', borderRadius:3, letterSpacing:'0.05em'}}>
-                            RSVP 수동
+                            기타
                           </span>
                         )}
                       </div>
@@ -6876,6 +6923,30 @@ function RsvpTab({state, fullState, update, project, readOnly}){
                     <td style={{fontSize:12.5}}>{b.country || '—'}</td>
                     <td>
                       <PreferredContentSummary buyer={b}/>
+                    </td>
+                    <td>
+                      {(() => {
+                        const ps = b.pitchingShowcase;
+                        if (!ps || ps === '') {
+                          return <span style={{fontSize:11.5, color:'var(--muted-2)'}}>—</span>;
+                        }
+                        const colors = {
+                          '참석': {bg:'#DCFCE7', border:'#16A34A', color:'#166534'},
+                          '불참': {bg:'#FEE2E2', border:'#DC2626', color:'#991B1B'},
+                          '미정': {bg:'#FEF3C7', border:'#F59E0B', color:'#92400E'},
+                        };
+                        const c = colors[ps] || {bg:'var(--ivory-2)', border:'var(--line)', color:'var(--muted)'};
+                        return (
+                          <span style={{
+                            display:'inline-flex', alignItems:'center', justifyContent:'center',
+                            padding:'3px 10px', fontSize:11, fontWeight:600,
+                            background: c.bg, border: `1px solid ${c.border}`, color: c.color,
+                            borderRadius:4, minWidth:48, textAlign:'center',
+                          }}>
+                            {ps}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td>
                       {(b.preferredDates && b.preferredDates.length > 0)
@@ -6962,6 +7033,7 @@ function RsvpRegisterModal({fullState, defaultProject, onClose, onSubmit}){
     category: '', categories: [],
     companySize: '', interestedProducts: '',
     interestedGenres: [], interestedFormats: [], interestedTargetAges: [], interestedRegions: [],
+    pitchingShowcase: '',  // 피칭쇼케이스 참석여부
     preferredDates: [],
   });
   const [autoFilled, setAutoFilled] = useState(false);
@@ -6999,6 +7071,7 @@ function RsvpRegisterModal({fullState, defaultProject, onClose, onSubmit}){
       id,
       invitationStatus: 'accepted', // RSVP 수락 처리
       preferredDates: form.preferredDates,
+      source: 'manual_rsvp', // RSVP 수동 등록 출처
     };
     onSubmit(buyer);
   };
@@ -7235,6 +7308,30 @@ function RsvpRegisterModal({fullState, defaultProject, onClose, onSubmit}){
           <label className="label">관심 품목</label>
           <input className="input" value={form.interestedProducts} onChange={e=>setForm({...form, interestedProducts:e.target.value})}
                  placeholder="예: 키즈 애니메이션, IP 라이선스"/>
+        </div>
+
+        <div style={{gridColumn:'1 / -1'}}>
+          <label className="label">피칭쇼케이스 참석여부</label>
+          <div style={{display:'flex', gap:6, flexWrap:'wrap'}}>
+            {['참석', '불참', '미정'].map(opt => {
+              const selected = form.pitchingShowcase === opt;
+              const colors = {'참석':'#16A34A', '불참':'#DC2626', '미정':'#F59E0B'};
+              return (
+                <button key={opt} type="button"
+                  onClick={()=>setForm({...form, pitchingShowcase: selected ? '' : opt})}
+                  style={{
+                    padding:'7px 16px', borderRadius:999, cursor:'pointer',
+                    border: selected ? `1px solid ${colors[opt]}` : '1px solid var(--line)',
+                    background: selected ? colors[opt] : 'var(--paper)',
+                    color: selected ? '#fff' : 'var(--ink-2)',
+                    fontSize:12, fontWeight:600, fontFamily:'inherit',
+                    transition:'all .15s',
+                  }}>
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div style={{gridColumn:'1 / -1'}}>
