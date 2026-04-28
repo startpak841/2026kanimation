@@ -994,6 +994,138 @@ const css = `
     position:absolute; border-radius:50%; filter:blur(40px); pointer-events:none;
     animation:float 8s ease-in-out infinite;
   }
+
+  /* ============================ MOBILE OPTIMIZATION ============================ */
+  @media (max-width: 767px) {
+    /* 메인 컨테이너 padding 축소 */
+    main { padding: 24px 16px !important; }
+
+    /* 섹션 헤더 글자 크기 모바일 */
+    .serif { line-height: 1.3; }
+
+    /* 그리드를 1열로 (그리드 사용한 곳들) */
+    [style*="gridTemplateColumns"][style*="repeat(2"],
+    [style*="gridTemplateColumns"][style*="repeat(3"],
+    [style*="gridTemplateColumns"][style*="repeat(4"] {
+      grid-template-columns: 1fr !important;
+    }
+
+    /* 2칼럼 그리드 — 1칼럼 */
+    [style*="grid-template-columns: 1fr 1fr"],
+    [style*="gridTemplateColumns: '1fr 1fr'"] {
+      grid-template-columns: 1fr !important;
+    }
+
+    /* 테이블은 가로 스크롤 컨테이너 안에서 */
+    .mice-table {
+      min-width: max-content;
+    }
+    .mice-table-wrap, [data-table-wrap] {
+      overflow-x: auto !important;
+      -webkit-overflow-scrolling: touch;
+      max-width: 100vw;
+    }
+
+    /* 모달 풀스크린 */
+    .mice-modal {
+      width: 100vw !important;
+      max-width: 100vw !important;
+      height: 100vh !important;
+      max-height: 100vh !important;
+      border-radius: 0 !important;
+      margin: 0 !important;
+    }
+
+    /* 헤더 좌우 여백 축소 */
+    .portal-header { padding: 14px 16px !important; }
+
+    /* 탭 네비게이션 가로 스크롤 */
+    nav[role="tablist"], nav > div[style*="display:flex"] {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      flex-wrap: nowrap !important;
+    }
+
+    /* 버튼 모바일 최적 사이즈 */
+    .btn {
+      min-height: 38px;
+      padding: 9px 14px;
+      font-size: 13px;
+    }
+
+    /* 입력 필드 자동 줌 방지 (16px 이상 필수) */
+    .input, .select, .textarea, input, select, textarea {
+      font-size: 16px !important;
+      min-height: 42px;
+    }
+
+    /* 카드·박스 padding 축소 */
+    .mice-card { padding: 16px !important; }
+
+    /* 큰 헤딩 모바일 사이즈 */
+    h1, .h1 { font-size: 22px !important; }
+    h2, .h2 { font-size: 18px !important; }
+
+    /* 큰 글자 클래스 모바일 사이즈 */
+    [style*="fontSize:32"], [style*="fontSize:36"], [style*="fontSize:40"], [style*="fontSize:48"], [style*="fontSize:56"] {
+      font-size: 24px !important;
+    }
+    [style*="fontSize:28"], [style*="fontSize:30"] {
+      font-size: 20px !important;
+    }
+    [style*="fontSize:24"], [style*="fontSize:26"] {
+      font-size: 18px !important;
+    }
+
+    /* SectionHeader desc 모바일 폰트 */
+    [data-section-desc] {
+      font-size: 12.5px !important;
+      line-height: 1.6 !important;
+    }
+
+    /* 큰 padding 모바일에서 축소 */
+    [style*="padding:40px"], [style*="padding: 40px"] {
+      padding: 20px !important;
+    }
+    [style*="padding:32px"], [style*="padding: 32px"] {
+      padding: 18px !important;
+    }
+    [style*="padding:24px"], [style*="padding: 24px"] {
+      padding: 16px !important;
+    }
+
+    /* 키비주얼 영역 높이 축소 */
+    .kv-hero { min-height: 60vh !important; padding: 40px 20px !important; }
+    .kv-orb { display: none; } /* 무거운 효과 모바일에서 제거 */
+
+    /* 로그인 카드 너비 */
+    .login-card { width: calc(100vw - 32px) !important; max-width: 420px !important; }
+
+    /* PC 권장 안내문 — 모바일에서만 강제 표시 */
+    .desktop-recommended {
+      display: block !important;
+      padding: 12px 16px;
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      border-radius: 6px;
+      font-size: 12px;
+      color: #92400e;
+      margin-bottom: 16px;
+      line-height: 1.5;
+    }
+    .desktop-recommended::before {
+      content: "💻 ";
+    }
+  }
+
+  /* 작은 폰 (≤380px) */
+  @media (max-width: 380px) {
+    main { padding: 20px 12px !important; }
+    .btn { padding: 8px 12px !important; font-size: 12.5px !important; }
+    .mice-card { padding: 14px !important; }
+    h1, .h1 { font-size: 20px !important; }
+    h2, .h2 { font-size: 16px !important; }
+  }
 `;
 
 // ============================ APP SHELL ============================
@@ -1326,10 +1458,12 @@ function LoginScreen({ state, onAuth }) {
                 </div>
 
                 <label className="label" style={{fontSize:10.5}}>ID</label>
-                <input className="input" autoFocus value={loginId} onChange={e=>setLoginId(e.target.value)} placeholder={mode==='admin'?'admin':'participant ID'} onKeyDown={e=>e.key==='Enter'&&tryLogin()}/>
+                <input className="input" autoFocus value={loginId} onChange={e=>setLoginId(e.target.value)} placeholder={mode==='admin'?'admin':'participant ID'} onKeyDown={e=>e.key==='Enter'&&tryLogin()}
+                  autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="text"/>
                 <div style={{height:14}}/>
                 <label className="label" style={{fontSize:10.5}}>Password</label>
-                <input className="input" type="password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&tryLogin()}/>
+                <input className="input" type="password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&tryLogin()}
+                  autoCapitalize="none" autoCorrect="off" spellCheck={false}/>
 
                 {err && (
                   <div style={{color:'var(--red)', fontSize:12.5, marginTop:14, display:'flex', alignItems:'center', gap:7, padding:'10px 12px', background:'#FEE2E2', borderRadius:'var(--radius-sm)', border:'1px solid #FCA5A5'}}>
@@ -4806,6 +4940,10 @@ function MatchMatrixTab({state, fullState, project}){
     <div className="fade-in">
       <SectionHeader eyebrow="ANALYTICS / IP × BUYER MATRIX" title="바이어 매칭 매트릭스"
         desc="참가사의 각 IP별로 회신 완료 바이어와의 매칭 적합도를 분석합니다. 희망 카테고리 순위(60점) + 권역·장르·포맷·타겟연령 각 10점의 raw 점수를 합산 후 100점 기준으로 백분율 환산됩니다. 셀 클릭 시 점수 상세 근거를 확인할 수 있습니다." />
+
+      <div className="desktop-recommended" style={{display:'none'}}>
+        매칭 매트릭스는 가로로 넓은 화면에서 가장 잘 보입니다. 정확한 분석을 원하시면 PC에서 접속해주세요. 폰에서는 가로 스크롤로 확인 가능합니다.
+      </div>
 
       {/* 행사 서브 스위처 */}
       <div style={{display:'flex', gap:8, marginTop:24, marginBottom:16}}>
