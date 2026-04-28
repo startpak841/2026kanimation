@@ -1020,6 +1020,10 @@ const css = `
 
   /* ============================ MOBILE OPTIMIZATION ============================ */
   @media (max-width: 767px) {
+    /* 대시보드 KPI 카드 — 5열을 2열로 */
+    .kpi-grid-5 { grid-template-columns: repeat(2, 1fr) !important; }
+    /* 대시보드 2칼럼 섹션 — 모바일 1열 */
+    .kpi-grid-2 { grid-template-columns: 1fr !important; }
     /* 메인 컨테이너 padding 축소 */
     main { padding: 24px 16px !important; }
 
@@ -3064,7 +3068,7 @@ function AdminConsole({ state, update, viewerMode, onLogout }) {
       <ProjectSwitcher state={state} project={project} setProject={setProject}/>
 
       <nav style={{background:'linear-gradient(180deg, #1E1B4B 0%, #312E81 100%)', borderBottom:'1px solid rgba(139,92,246,0.3)'}}>
-        <div style={{maxWidth:1360, margin:'0 auto', padding:'0 40px', display:'flex', gap:4}}>
+        <div style={{maxWidth:1360, margin:'0 auto', padding:'0 40px', display:'flex', gap:4, overflowX:'auto', WebkitOverflowScrolling:'touch'}}>
           {TABS.map(t => (
             <button key={t.k} onClick={()=>setTab(t.k)}
               style={{
@@ -3073,6 +3077,7 @@ function AdminConsole({ state, update, viewerMode, onLogout }) {
                 fontFamily:'inherit', fontSize:13.5, fontWeight: tab===t.k ? 600 : 500, letterSpacing:'-0.005em',
                 borderBottom: tab===t.k ? '2px solid #E879F9' : '2px solid transparent',
                 display:'flex', alignItems:'center', gap:8, transition:'all .15s',
+                whiteSpace:'nowrap', flexShrink:0,
                 textShadow: tab===t.k ? '0 0 12px rgba(232,121,249,0.5)' : 'none',
               }}
               onMouseEnter={e => { if (tab!==t.k) e.currentTarget.style.color = 'rgba(255,255,255,0.95)'; }}
@@ -3160,7 +3165,7 @@ function OverviewTab({state, project}){
       <SectionHeader eyebrow={`MASTER CONTROL${project && project!=='ALL' ? ' · '+project : ''}`} title="현황 대시보드"
         desc={project==='ALL' ? '전체 프로젝트 통합 운영 지표. 실시간 집계 · 자동 갱신.' : `${project} 프로젝트 운영 지표. 상단 프로젝트 스위처로 전환할 수 있습니다.`}/>
 
-      <div className="grid stagger" style={{gridTemplateColumns:'repeat(5,1fr)', gap:12, marginTop:24}}>
+      <div className="grid stagger kpi-grid-5" style={{gridTemplateColumns:'repeat(5,1fr)', gap:12, marginTop:24}}>
         <KPI label="PARTICIPANTS" value={totals.exhibitors}/>
         <KPI label="BUYERS"     value={totals.buyers}/>
         <KPI label="ACCEPTED"   value={totals.accepted} accent/>
@@ -3168,7 +3173,7 @@ function OverviewTab({state, project}){
         <KPI label="MEETINGS"   value={totals.meetings} accent/>
       </div>
 
-      <div className="grid" style={{gridTemplateColumns:'1.2fr 1fr', gap:16, marginTop:24}}>
+      <div className="grid kpi-grid-2" style={{gridTemplateColumns:'1.2fr 1fr', gap:16, marginTop:24}}>
         <div className="card" style={{padding:28}}>
           <div className="mono" style={{fontSize:10, letterSpacing:'0.2em', color:'var(--muted)'}}>SECTION A</div>
           <div className="serif" style={{fontSize:22, fontWeight:500, marginTop:4, marginBottom:18}}>초청 회신율</div>
