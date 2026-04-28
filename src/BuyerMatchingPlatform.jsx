@@ -1010,17 +1010,12 @@ const css = `
   }
 
   /* ============================ RESPONSIVE LAYOUT ============================ */
-  /* main 컨테이너 — 화면 크기에 따라 자동 padding (인라인 style보다 우선) */
-  body main {
-    padding-left: var(--pad-page) !important;
-    padding-right: var(--pad-page) !important;
-  }
-  /* 컨텐츠 자동 워드브레이크 — 한국어 글자 단위 줄바꿈 안되게 */
-  body, p, h1, h2, h3, h4, h5, h6, span, div, td, th, li {
+  /* 한국어 단어 단위 줄바꿈 - 본문 텍스트 한정 (제목·인라인 칩 제외) */
+  p, .desc-text, [data-section-desc] {
     word-break: keep-all;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
-  /* 코드·단어 강제 끊기 필요한 곳은 명시적으로 .force-break */
+  /* 코드·긴 영문 강제 끊기 필요한 곳은 명시적으로 .force-break */
   .force-break { word-break: break-all !important; }
 
   /* ============================ MOBILE OPTIMIZATION ============================ */
@@ -1145,49 +1140,12 @@ const css = `
       content: "💻 ";
     }
 
-    /* === 인라인 style 강제 덮어쓰기 (반응형 자동 적용) === */
-    /* 인라인 maxWidth 큰 값들 100%로 */
-    [style*="maxWidth:1360"], [style*="maxWidth: 1360"],
-    [style*="maxWidth:1280"], [style*="maxWidth: 1280"],
-    [style*="maxWidth:1200"], [style*="maxWidth: 1200"] {
+    /* === 모바일에서만 인라인 큰 값들 자동 축소 (PC 디자인 유지) === */
+    /* maxWidth 1360 같은 큰 값만 100%로 (그 외는 그대로) */
+    [style*="maxWidth:1360"], [style*="maxWidth: 1360"] {
       max-width: 100% !important;
     }
-    /* 인라인 width 큰 값들 100%로 */
-    [style*="width:1360"], [style*="width: 1360"],
-    [style*="width:1280"], [style*="width: 1280"],
-    [style*="width:1200"], [style*="width: 1200"] {
-      width: 100% !important;
-    }
-    /* 큰 폰트 인라인 강제 축소 */
-    [style*="fontSize:48"], [style*="fontSize: 48"],
-    [style*="fontSize:56"], [style*="fontSize: 56"],
-    [style*="fontSize:64"], [style*="fontSize: 64"] {
-      font-size: 28px !important;
-    }
-    [style*="fontSize:36"], [style*="fontSize: 36"],
-    [style*="fontSize:40"], [style*="fontSize: 40"] {
-      font-size: 22px !important;
-    }
-    [style*="fontSize:32"], [style*="fontSize: 32"] {
-      font-size: 20px !important;
-    }
-    [style*="fontSize:28"], [style*="fontSize: 28"],
-    [style*="fontSize:30"], [style*="fontSize: 30"] {
-      font-size: 19px !important;
-    }
-    [style*="fontSize:24"], [style*="fontSize: 24"],
-    [style*="fontSize:26"], [style*="fontSize: 26"] {
-      font-size: 17px !important;
-    }
-    /* 큰 padding 인라인 강제 축소 */
-    [style*="padding:48"], [style*="padding: 48"] {
-      padding: 24px !important;
-    }
-    [style*="padding:'40px"], [style*="padding: '40px"],
-    [style*='padding:"40px'], [style*='padding: "40px'] {
-      padding: 20px !important;
-    }
-    /* main 태그 안의 모든 인라인 padding 무력화 */
+    /* main 태그 안의 인라인 padding 무력화 (헤더·메뉴는 그대로) */
     body main {
       padding-left: 16px !important;
       padding-right: 16px !important;
@@ -1199,8 +1157,6 @@ const css = `
     body main { padding: 20px 12px !important; }
     .btn { padding: 8px 12px !important; font-size: 12.5px !important; }
     .mice-card { padding: 14px !important; }
-    h1, .h1 { font-size: 20px !important; }
-    h2, .h2 { font-size: 16px !important; }
   }
 `;
 
@@ -2969,9 +2925,9 @@ function SectionHeader({eyebrow, title, desc}){
         {eyebrow}
       </div>
 
-      {/* Title — 굵고 진한 본 제목 (자동 폰트 크기) */}
+      {/* Title — 굵고 진한 본 제목 */}
       <h2 className="serif" style={{
-        fontSize:'clamp(20px, 4.5vw, 32px)',
+        fontSize:'clamp(20px, 3vw, 32px)',
         fontWeight:700,
         margin:0,
         letterSpacing:'-0.025em',
@@ -2986,13 +2942,14 @@ function SectionHeader({eyebrow, title, desc}){
       {desc && (
         <p data-section-desc style={{
           color:'var(--ink-2)',
-          fontSize:'clamp(12px, 2.2vw, 13.5px)',
+          fontSize:'13.5px',
           lineHeight:1.7,
           maxWidth:720,
           marginTop:14,
           marginBottom:0,
           fontWeight:400,
           wordBreak:'keep-all',
+          overflowWrap:'break-word',
         }}>
           {desc}
         </p>
@@ -6673,10 +6630,12 @@ function RsvpTab({state, fullState, update, project, readOnly}){
   return (
     <div className="fade-in">
       <SectionHeader eyebrow="WORKFLOW / RSVP" title="RSVP 회신 관리"
-        desc="행사별로 구글폼 응답 CSV 파일을 업로드하면 응답이 바이어 DB에 자동 누적됩니다. 구글 스프레드시트에서 '파일 → 다운로드 → CSV'로 받은 파일을 그대로 올리면 됩니다." />
+        desc={readOnly
+          ? "각 행사별 바이어 RSVP 회신 현황을 확인합니다. 행사별 탭에서 회신 완료된 바이어 명단과 희망 미팅일, 선호 콘텐츠를 조회할 수 있습니다."
+          : "행사별로 구글폼 응답 CSV 파일을 업로드하면 응답이 바이어 DB에 자동 누적됩니다. 구글 스프레드시트에서 '파일 → 다운로드 → CSV'로 받은 파일을 그대로 올리면 됩니다."} />
 
-      {/* 동기화 결과 토스트 */}
-      {syncResult && (
+      {/* 동기화 결과 토스트 (관리자 모드에서만) */}
+      {!readOnly && syncResult && (
         <div style={{marginTop:20, padding:'14px 18px', background:'#DCFCE7', border:'1px solid #16A34A', borderRadius:'var(--radius-sm)', fontSize:12.5, color:'#166534', lineHeight:1.7}}>
           <div style={{display:'flex', alignItems:'center', gap:10, marginBottom:6}}>
             <Check size={14}/>
@@ -6693,7 +6652,8 @@ function RsvpTab({state, fullState, update, project, readOnly}){
         </div>
       )}
 
-      {/* 프로젝트별 CSV 업로드 카드 */}
+      {/* 프로젝트별 CSV 업로드 카드 — KOCCA 뷰어 모드에서는 통째로 숨김 */}
+      {!readOnly && (
       <div className="grid stagger" style={{gridTemplateColumns:'repeat(3, 1fr)', gap:14, marginTop:24}}>
         {projects.map(p => {
           const col = projectColor(p);
@@ -6716,11 +6676,6 @@ function RsvpTab({state, fullState, update, project, readOnly}){
               <input type="file" ref={fileRefs[p]} accept=".csv,text/csv"
                      style={{display:'none'}}
                      onChange={e => { handleFileUpload(p, e.target.files[0]); e.target.value=''; }}/>
-              {readOnly ? (
-                <div style={{width:'100%', padding:'12px 14px', fontSize:12, textAlign:'center', background:'var(--ivory-2)', color:'var(--muted)', borderRadius:'var(--radius-sm)', border:'1px dashed var(--line)'}}>
-                  <Eye size={12} style={{verticalAlign:'middle', marginRight:4}}/>열람 전용 · 업로드 제한
-                </div>
-              ) : (
               <button className="btn btn-primary" style={{width:'100%', padding:'12px 14px', fontSize:12.5, justifyContent:'center', background: col.bg, borderColor: col.bg}}
                       onClick={()=>fileRefs[p].current?.click()} disabled={isSyncing}>
                 {isSyncing ? (
@@ -6734,7 +6689,6 @@ function RsvpTab({state, fullState, update, project, readOnly}){
                   </>
                 )}
               </button>
-              )}
               <div style={{fontSize:10, color:'var(--muted-2)', marginTop:8, lineHeight:1.55, textAlign:'center'}}>
                 구글 스프레드시트에서 <strong style={{color:'var(--muted)'}}>파일 → 다운로드 → CSV</strong>로 받은 파일 업로드
               </div>
@@ -6769,9 +6723,10 @@ function RsvpTab({state, fullState, update, project, readOnly}){
           );
         })}
       </div>
+      )}
 
-      {/* RSVP 수동 등록 버튼 */}
-      <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', margin:'36px 0 14px'}}>
+      {/* RSVP 수동 등록 버튼 (KOCCA 뷰어는 헤더만 표시, 등록 버튼 숨김) */}
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', margin: readOnly ? '24px 0 14px' : '36px 0 14px'}}>
         <div>
           <div className="mono" style={{fontSize:10, letterSpacing:'0.15em', color:'var(--muted)', marginBottom:4}}>RESPONDED BUYERS · READY FOR MEETING</div>
           <div className="serif" style={{fontSize:20, fontWeight:600}}>RSVP 회신 완료 바이어</div>
