@@ -4606,7 +4606,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
         </div>
       )}
 
-      {/* 미팅 출처별 컬러바 범례 */}
+      {/* 미팅 출처별 색상 범례 */}
       <div style={{
         marginTop:16, padding:'10px 14px',
         background:'var(--ivory-2)',
@@ -4619,19 +4619,19 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
           미팅 출처
         </span>
         <span style={{display:'inline-flex', alignItems:'center', gap:6}}>
-          <span style={{display:'inline-block', width:4, height:14, background:'#06B6D4', borderRadius:2}}/>
+          <span style={{display:'inline-block', width:18, height:14, background:'#06B6D4', borderRadius:3}}/>
           참가사 등록
         </span>
         <span style={{display:'inline-flex', alignItems:'center', gap:6}}>
-          <span style={{display:'inline-block', width:4, height:14, background:'#F59E0B', borderRadius:2}}/>
+          <span style={{display:'inline-block', width:18, height:14, background:'#F59E0B', borderRadius:3}}/>
           관리자 편성
         </span>
         <span style={{display:'inline-flex', alignItems:'center', gap:6}}>
-          <span style={{display:'inline-block', width:4, height:14, background:'#9CA3AF', borderRadius:2}}/>
+          <span style={{display:'inline-block', width:18, height:14, background:'#6B7280', borderRadius:3}}/>
           자동 생성 (CSV)
         </span>
         <span style={{fontSize:10.5, color:'var(--muted)', marginLeft:'auto'}}>
-          미팅 카드 좌측 컬러바로 출처 구분 · 호버 시 상세 표시
+          미팅 슬롯 색상으로 출처 구분 · 호버 시 상세 표시
         </span>
       </div>
 
@@ -4739,15 +4739,16 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                             <div style={{display:'flex', flexDirection:'column', gap:4}}>
                               {ms.map(m => {
                                 const buyer = getBuyer(m.buyerId);
-                                const col = projectColor(buyer?.project || subProject);
                                 const dragging = draggingId === m.id;
-                                // 미팅 출처에 따른 시각적 구분
+                                // 미팅 출처에 따른 셀 색상 구분
                                 const isExhibitor = m.source === 'exhibitor_self';
                                 const isAdmin = m.source === 'admin_added' || m.source === 'admin_manual';
                                 const isAuto = !isExhibitor && !isAdmin;
-                                const sourceBar = isExhibitor ? '#06B6D4'   // 청록 — 참가사
-                                                : isAdmin ? '#F59E0B'        // 황금 — 관리자
-                                                : '#9CA3AF';                  // 회색 — 자동
+                                // 출처별 색상 — 셀 배경 통일
+                                const bg = isExhibitor ? '#06B6D4'   // 청록 — 참가사
+                                         : isAdmin ? '#F59E0B'        // 황금 — 관리자
+                                         : '#6B7280';                  // 회색 — 자동
+                                const fg = '#fff';
                                 const sourceLabel = isExhibitor ? '참가사 등록'
                                                   : isAdmin ? '관리자 편성'
                                                   : '자동 생성 (CSV)';
@@ -4763,16 +4764,14 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                                     onDragEnd={() => { setDraggingId(null); setDropTarget(null); }}
                                     onClick={()=>{ if (!readOnly) openEdit(m); }}
                                     style={{
-                                      padding:'8px 10px 8px 12px',
+                                      padding:'8px 10px',
                                       borderRadius:'var(--radius-sm)',
                                       cursor: readOnly ? 'default' : 'grab',
-                                      background: col.bg, color: col.fg,
-                                      borderLeft: `4px solid ${sourceBar}`,
+                                      background: bg, color: fg,
                                       transition:'all .15s', minHeight:34,
                                       display:'flex', alignItems:'center', justifyContent:'center',
                                       opacity: dragging ? 0.4 : 1,
                                       boxShadow: dragging ? 'none' : '0 1px 2px rgba(0,0,0,0.08)',
-                                      position:'relative',
                                     }}
                                     title={readOnly
                                       ? `${buyer?.companyName || '—'} · ${buyer?.contactName || '—'}\n출처: ${sourceLabel}`
