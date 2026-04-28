@@ -2619,6 +2619,11 @@ function MyMeetingsTab({state, update, me}){
         invitationStatus: 'accepted',
         preferredDates: [selectedDate],
         source: 'exhibitor_added',
+        pitchingShowcase: '',  // 참가사가 등록한 바이어는 피칭쇼케이스 빈 값
+        // 확정 정보 자동 동기화 (RSVP 페이지에서 즉시 표시되도록)
+        confirmedDate: selectedDate,
+        confirmedTime: slotAction.time,
+        confirmedExhibitorId: me.id,
       };
 
       const newMeeting = {
@@ -3447,7 +3452,15 @@ function BuyersTab({state, fullState, update, project, readOnly}){
           return result;
         };
         o.interestedRegions = parseRegions(o.interestedRegions);
-        // 프로젝트 자동 할당
+        // 프로젝트 정규화 (대소문자/별칭 인식)
+        if (o.project) {
+          const pv = String(o.project).trim().toUpperCase();
+          if (pv.includes('MIFA')) o.project = 'MIFA';
+          else if (pv.includes('MIPCOM') || pv.includes('MIP COM')) o.project = 'MIPCOM';
+          else if (pv.includes('CANADA') || pv.includes('CDN') || pv.includes('TIFFCOM')) o.project = 'CANADA';
+          else o.project = ''; // 인식 불가 → 자동 할당으로 fallback
+        }
+        // 프로젝트 자동 할당 (CSV에 명시 안 됐거나 인식 불가)
         if (!o.project && project && project !== 'ALL') o.project = project;
         if (!o.id) {
           const prefix = o.project ? `BU-${o.project}` : 'BU';
@@ -3492,8 +3505,9 @@ function BuyersTab({state, fullState, update, project, readOnly}){
   };
 
   const downloadTemplate = () => {
-    // 업로드 파일과 동일한 22개 컬럼 구조 — 카테고리는 12개 개별 컬럼에 'O'로 표기
+    // 업로드 파일 구조 — 프로젝트 + 22개 컬럼
     const headers = [
+      '프로젝트\n(MIFA / MIPCOM / CANADA)',
       '국가', '회사명', '담당자', '직급', '연락처', '이메일',
       'Broadcaster\n(방송사)',
       'Streaming/OTT\n(OTT 플랫폼)',
@@ -3513,22 +3527,22 @@ function BuyersTab({state, fullState, update, project, readOnly}){
       '피칭쇼케이스\n(참석/불참/미정)',
       '초청상태',
     ];
-    // 샘플 3개 — 다양한 카테고리 조합 시연
-    const sample1 = ['France', 'Sample Broadcaster + OTT', 'Jane Leclerc', 'Head of Acquisitions', '+33-1-4200-0000', 'jane@sample.fr',
+    // 샘플 3개 — 다양한 프로젝트·카테고리 조합 시연
+    const sample1 = ['MIFA', 'France', 'Sample Broadcaster + OTT', 'Jane Leclerc', 'Head of Acquisitions', '+33-1-4200-0000', 'jane@sample.fr',
       'O', 'O', '',  '', '', '', '', '', '', '', '', '',
       '공영방송 + 자체 OTT 플랫폼 · 키즈 · 애니메이션 편성', '대기업', '시리즈 52x11′',
       '액션/어드벤처, 코미디, 판타지', 'TV 시리즈, 디지털 / 숏폼', '키즈 (5-8), 패밀리 (All-Ages), 틴 (9-14)',
       'EU, NA',
       '참석',
       ''];
-    const sample2 = ['Japan', 'Sample Animation Studio', 'Yuki Tanaka', 'Producer', '+81-3-0000-0000', 'tanaka@sample.jp',
+    const sample2 = ['MIPCOM', 'Japan', 'Sample Animation Studio', 'Yuki Tanaka', 'Producer', '+81-3-0000-0000', 'tanaka@sample.jp',
       '', '', '',  'O', 'O', '', '', '', '', '', '', '',
       '3D CG 애니메이션 스튜디오 · 공동제작 경험 다수', '중견', '극장판·시리즈 공동제작',
       '액션/어드벤처, SF, 판타지', '장편 극장판, TV 시리즈', '틴 (9-14), YA (15-18)',
       'AS, Global',
       '미정',
       ''];
-    const sample3 = ['USA', 'Sample Licensee + Merchandising', 'John Doe', 'VP Licensing', '+1-310-555-0100', 'john@sample.com',
+    const sample3 = ['CANADA', 'USA', 'Sample Licensee + Merchandising', 'John Doe', 'VP Licensing', '+1-310-555-0100', 'john@sample.com',
       '', '', '',  '', '', '', '', '', 'O', '', 'O', '',
       '완구·퍼블리싱·MD 종합 라이선싱', '대기업', '완구·출판·어패럴',
       '코미디, 판타지', 'IP 라이선싱', '유아 (0-4), 키즈 (5-8), 패밀리 (All-Ages)',
@@ -3537,8 +3551,9 @@ function BuyersTab({state, fullState, update, project, readOnly}){
       ''];
     const aoa = [headers, sample1, sample2, sample3];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    // 컬럼 너비 설정
+    // 컬럼 너비 설정 (프로젝트 컬럼 추가됨)
     ws['!cols'] = [
+      {wch:12},  // 프로젝트
       {wch:12}, {wch:36}, {wch:22}, {wch:22}, {wch:16}, {wch:28},
       {wch:12}, {wch:12}, {wch:12}, {wch:12}, {wch:12}, {wch:12},
       {wch:12}, {wch:14}, {wch:14}, {wch:14}, {wch:12}, {wch:10},
@@ -4869,10 +4884,13 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
 
       {/* 상세/편집/신규 통합 모달 */}
       {modalMode && modalData && (
-        <Modal title={modalMode === 'new' ? '미팅 추가' : '미팅 상세 / 편집'} onClose={closeModal}>
+        <Modal title={modalMode === 'new' ? `미팅 추가 · ${subProject}` : `미팅 상세 / 편집 · ${subProject}`} onClose={closeModal}>
           <div style={{padding:'10px 14px', background:'var(--ivory-2)', fontSize:11.5, color:'var(--muted)', marginBottom:18, lineHeight:1.6, borderRadius:'var(--radius-sm)'}}>
+            <div style={{display:'inline-flex', alignItems:'center', gap:6, padding:'2px 9px', background:'var(--purple-lt)', color:'var(--purple-dk)', borderRadius:3, fontWeight:700, fontSize:10.5, letterSpacing:'0.04em', marginRight:8, verticalAlign:'middle'}}>
+              <Calendar size={10}/>{subProject}
+            </div>
             {modalMode === 'new'
-              ? '참가사를 선택하고 바이어 정보(회사명·바이어명·직급·이메일·연락처)를 직접 입력하세요. 저장 시 바이어 DB에 자동 등록되며, 회사명 기반으로 분야·카테고리·규모가 자동 추정됩니다.'
+              ? `참가사를 선택하고 바이어 정보(회사명·바이어명·직급·이메일·연락처)를 직접 입력하세요. 등록되는 바이어는 ${subProject} 프로젝트에 자동 배정됩니다.`
               : '편집한 바이어 정보는 바이어 DB에도 동시에 반영됩니다.'}
           </div>
 
@@ -6491,6 +6509,19 @@ function RsvpTab({state, fullState, update, project, readOnly}){
     const o = { project: pKey, source: 'google_form', invitationStatus: 'accepted', preferredDates: [] };
     const keys = Object.keys(row);
 
+    // 0차: CSV에 'project' 또는 '프로젝트' 또는 '행사' 컬럼이 있으면 그 값을 우선 사용
+    // 인식되는 표기: MIFA, MIPCOM, CANADA (대소문자 무관)
+    keys.forEach(k => {
+      const kl = k.toLowerCase().trim();
+      if (kl === 'project' || kl === 'projects' || kl.includes('프로젝트') || kl.includes('행사') || kl === 'event' || kl === 'events') {
+        const v = String(row[k] || '').trim().toUpperCase();
+        if (v.includes('MIFA')) o.project = 'MIFA';
+        else if (v.includes('MIPCOM') || v.includes('MIP COM')) o.project = 'MIPCOM';
+        else if (v.includes('CANADA') || v.includes('CDN') || v.includes('TIFFCOM')) o.project = 'CANADA';
+        // 인식 불가하면 그대로 pKey 유지
+      }
+    });
+
     // 1차: 헤더 기반 정확 매칭 (+ 변형 허용)
     keys.forEach(k => {
       const v = row[k];
@@ -6635,8 +6666,19 @@ function RsvpTab({state, fullState, update, project, readOnly}){
     if (skippedNoName > 0) {
       console.warn(`[CSV] 전체 ${rows.length}행 중 ${skippedNoName}행이 회사명 누락으로 건너뜀`);
     }
+
+    // 프로젝트 분포 진단 — 업로드 탭(p)과 CSV에 명시된 프로젝트가 다른 경우 경고
+    const projectCounts = mapped.reduce((acc, b) => {
+      acc[b.project] = (acc[b.project] || 0) + 1;
+      return acc;
+    }, {});
+    const otherProjects = Object.keys(projectCounts).filter(pj => pj !== p);
+    if (otherProjects.length > 0) {
+      const detail = otherProjects.map(pj => `${pj} ${projectCounts[pj]}건`).join(', ');
+      console.info(`[CSV] 업로드 탭 "${p}" 외 다른 프로젝트도 감지됨: ${detail} — CSV의 project 컬럼 값을 우선 적용합니다.`);
+    }
+
     let added = 0, updated = 0, meetingsCreated = 0, meetingsSkippedNotInterested = 0, meetingsSkippedNoSlot = 0, meetingsSkippedUnmatched = 0;
-    const eventConfig = EVENT_CONFIG[p];
 
     update(s => {
       const buyers = [...s.buyers];
@@ -6644,10 +6686,14 @@ function RsvpTab({state, fullState, update, project, readOnly}){
       const exhibitors = s.exhibitors || [];
 
       mapped.forEach(nb => {
-        // (1) 바이어 등록/업데이트
+        // 각 바이어의 실제 프로젝트는 nb.project (CSV 우선, 없으면 p)
+        const buyerProject = nb.project;
+        const eventConfig = EVENT_CONFIG[buyerProject];
+
+        // (1) 바이어 등록/업데이트 — 매칭은 buyerProject 기준
         let buyerId;
         const idx = buyers.findIndex(eb =>
-          eb.project === p && (
+          eb.project === buyerProject && (
             (nb.email && eb.email && nb.email.toLowerCase() === eb.email.toLowerCase()) ||
             (!nb.email && nb.companyName && eb.companyName && nb.companyName.toLowerCase() === eb.companyName.toLowerCase())
           )
@@ -6677,7 +6723,7 @@ function RsvpTab({state, fullState, update, project, readOnly}){
           updated++;
         } else {
           const seq = buyers.length + 1;
-          buyerId = `BU-${p}-${String(seq).padStart(4,'0')}`;
+          buyerId = `BU-${buyerProject}-${String(seq).padStart(4,'0')}`;
           buyers.push({ id: buyerId, ...nb });
           added++;
         }
@@ -6694,14 +6740,14 @@ function RsvpTab({state, fullState, update, project, readOnly}){
           const handledExhIds = new Set(); // 동일 CSV 행 내 같은 참가사 중복 방지
 
           exhibitorNames.forEach(exhName => {
-            const exhId = mapExhibitorNameToId(exhName, exhibitors, p);
+            const exhId = mapExhibitorNameToId(exhName, exhibitors, buyerProject);
             if (exhId === 'NOT_INTERESTED') {
               meetingsSkippedNotInterested++;
               return;
             }
             if (!exhId) {
               meetingsSkippedUnmatched++;
-              console.warn(`[CSV] 매칭 실패: "${exhName}" — 등록된 참가사 명단 확인 필요`);
+              console.warn(`[CSV] 매칭 실패: "${exhName}" (프로젝트 ${buyerProject}) — 등록된 참가사 명단 확인 필요`);
               return;
             }
             // 같은 행 내 중복 (예: "climax, climax") 방지
