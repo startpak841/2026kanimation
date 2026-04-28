@@ -771,6 +771,20 @@ const css = `
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap');
 
   :root{
+    /* ===== RESPONSIVE SPACING & FONT (clamp 기반 자동 반응형) ===== */
+    --pad-page: clamp(16px, 4vw, 40px);      /* 페이지 좌우 padding */
+    --pad-section: clamp(20px, 4vw, 40px);   /* 섹션 padding */
+    --pad-card: clamp(14px, 3vw, 24px);      /* 카드 padding */
+    --gap-md: clamp(8px, 2vw, 16px);
+    --gap-lg: clamp(12px, 3vw, 24px);
+
+    --fs-h1: clamp(20px, 4.5vw, 32px);
+    --fs-h2: clamp(17px, 3.5vw, 24px);
+    --fs-h3: clamp(15px, 2.8vw, 18px);
+    --fs-body: clamp(13px, 2.2vw, 14.5px);
+    --fs-small: clamp(11px, 1.8vw, 12.5px);
+    --fs-tiny: clamp(10px, 1.5vw, 11px);
+
     /* ===== KAGS 2026 KEY VISUAL PALETTE — Cyan × Purple × Magenta Gradient ===== */
     --bg:#F8F9FE;            /* 거의 흰 배경 (그라데이션이 워낙 강해서 베이스는 밝게) */
     --paper:#FFFFFF;         /* 카드 기본 배경 */
@@ -995,6 +1009,20 @@ const css = `
     animation:float 8s ease-in-out infinite;
   }
 
+  /* ============================ RESPONSIVE LAYOUT ============================ */
+  /* main 컨테이너 — 화면 크기에 따라 자동 padding (인라인 style보다 우선) */
+  body main {
+    padding-left: var(--pad-page) !important;
+    padding-right: var(--pad-page) !important;
+  }
+  /* 컨텐츠 자동 워드브레이크 — 한국어 글자 단위 줄바꿈 안되게 */
+  body, p, h1, h2, h3, h4, h5, h6, span, div, td, th, li {
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+  /* 코드·단어 강제 끊기 필요한 곳은 명시적으로 .force-break */
+  .force-break { word-break: break-all !important; }
+
   /* ============================ MOBILE OPTIMIZATION ============================ */
   @media (max-width: 767px) {
     /* 메인 컨테이너 padding 축소 */
@@ -1116,11 +1144,59 @@ const css = `
     .desktop-recommended::before {
       content: "💻 ";
     }
+
+    /* === 인라인 style 강제 덮어쓰기 (반응형 자동 적용) === */
+    /* 인라인 maxWidth 큰 값들 100%로 */
+    [style*="maxWidth:1360"], [style*="maxWidth: 1360"],
+    [style*="maxWidth:1280"], [style*="maxWidth: 1280"],
+    [style*="maxWidth:1200"], [style*="maxWidth: 1200"] {
+      max-width: 100% !important;
+    }
+    /* 인라인 width 큰 값들 100%로 */
+    [style*="width:1360"], [style*="width: 1360"],
+    [style*="width:1280"], [style*="width: 1280"],
+    [style*="width:1200"], [style*="width: 1200"] {
+      width: 100% !important;
+    }
+    /* 큰 폰트 인라인 강제 축소 */
+    [style*="fontSize:48"], [style*="fontSize: 48"],
+    [style*="fontSize:56"], [style*="fontSize: 56"],
+    [style*="fontSize:64"], [style*="fontSize: 64"] {
+      font-size: 28px !important;
+    }
+    [style*="fontSize:36"], [style*="fontSize: 36"],
+    [style*="fontSize:40"], [style*="fontSize: 40"] {
+      font-size: 22px !important;
+    }
+    [style*="fontSize:32"], [style*="fontSize: 32"] {
+      font-size: 20px !important;
+    }
+    [style*="fontSize:28"], [style*="fontSize: 28"],
+    [style*="fontSize:30"], [style*="fontSize: 30"] {
+      font-size: 19px !important;
+    }
+    [style*="fontSize:24"], [style*="fontSize: 24"],
+    [style*="fontSize:26"], [style*="fontSize: 26"] {
+      font-size: 17px !important;
+    }
+    /* 큰 padding 인라인 강제 축소 */
+    [style*="padding:48"], [style*="padding: 48"] {
+      padding: 24px !important;
+    }
+    [style*="padding:'40px"], [style*="padding: '40px"],
+    [style*='padding:"40px'], [style*='padding: "40px'] {
+      padding: 20px !important;
+    }
+    /* main 태그 안의 모든 인라인 padding 무력화 */
+    body main {
+      padding-left: 16px !important;
+      padding-right: 16px !important;
+    }
   }
 
   /* 작은 폰 (≤380px) */
   @media (max-width: 380px) {
-    main { padding: 20px 12px !important; }
+    body main { padding: 20px 12px !important; }
     .btn { padding: 8px 12px !important; font-size: 12.5px !important; }
     .mice-card { padding: 14px !important; }
     h1, .h1 { font-size: 20px !important; }
@@ -2893,28 +2969,30 @@ function SectionHeader({eyebrow, title, desc}){
         {eyebrow}
       </div>
 
-      {/* Title — 굵고 진한 본 제목 (가장 강한 요소) */}
+      {/* Title — 굵고 진한 본 제목 (자동 폰트 크기) */}
       <h2 className="serif" style={{
-        fontSize:32,
+        fontSize:'clamp(20px, 4.5vw, 32px)',
         fontWeight:700,
         margin:0,
         letterSpacing:'-0.025em',
         color:'var(--ink)',
-        lineHeight:1.15,
+        lineHeight:1.2,
+        wordBreak:'keep-all',
       }}>
         {title}
       </h2>
 
       {/* Desc — 중간 강도로 */}
       {desc && (
-        <p style={{
+        <p data-section-desc style={{
           color:'var(--ink-2)',
-          fontSize:13.5,
+          fontSize:'clamp(12px, 2.2vw, 13.5px)',
           lineHeight:1.7,
           maxWidth:720,
           marginTop:14,
           marginBottom:0,
           fontWeight:400,
+          wordBreak:'keep-all',
         }}>
           {desc}
         </p>
@@ -4084,9 +4162,9 @@ function ExhibitorsTab({state, readOnly}){
                   <td>
                     <div style={{display:'flex', alignItems:'center', gap:8}}>
                       {hasLogo && <div style={{width:5, height:5, borderRadius:'50%', background:'#16A34A', flexShrink:0}} title="로고 업로드됨"/>}
-                      <div style={{minWidth:0}}>
-                        <div className="serif" style={{fontSize:14, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis'}}>{e.companyName}</div>
-                        <div style={{fontSize:11, color:'var(--muted)', marginTop:1, overflow:'hidden', textOverflow:'ellipsis'}}>
+                      <div style={{minWidth:0, flex:1}}>
+                        <div className="serif" style={{fontSize:14, fontWeight:600, wordBreak:'keep-all', lineHeight:1.3}}>{e.companyName}</div>
+                        <div style={{fontSize:11, color:'var(--muted)', marginTop:2, wordBreak:'break-word', lineHeight:1.3}}>
                           {e.companyNameEn || <span style={{color:'var(--muted-2)'}}>영문명 미입력</span>}
                         </div>
                       </div>
