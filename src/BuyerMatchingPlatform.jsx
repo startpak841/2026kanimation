@@ -4606,6 +4606,35 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
         </div>
       )}
 
+      {/* 미팅 출처별 컬러바 범례 */}
+      <div style={{
+        marginTop:16, padding:'10px 14px',
+        background:'var(--ivory-2)',
+        border:'1px solid var(--line)',
+        borderRadius:'var(--radius-sm)',
+        fontSize:11.5, color:'var(--ink-2)',
+        display:'flex', alignItems:'center', gap:18, flexWrap:'wrap',
+      }}>
+        <span className="mono" style={{fontSize:10, letterSpacing:'0.15em', color:'var(--muted)', fontWeight:700}}>
+          미팅 출처
+        </span>
+        <span style={{display:'inline-flex', alignItems:'center', gap:6}}>
+          <span style={{display:'inline-block', width:4, height:14, background:'#06B6D4', borderRadius:2}}/>
+          참가사 등록
+        </span>
+        <span style={{display:'inline-flex', alignItems:'center', gap:6}}>
+          <span style={{display:'inline-block', width:4, height:14, background:'#F59E0B', borderRadius:2}}/>
+          관리자 편성
+        </span>
+        <span style={{display:'inline-flex', alignItems:'center', gap:6}}>
+          <span style={{display:'inline-block', width:4, height:14, background:'#9CA3AF', borderRadius:2}}/>
+          자동 생성 (CSV)
+        </span>
+        <span style={{fontSize:10.5, color:'var(--muted)', marginLeft:'auto'}}>
+          미팅 카드 좌측 컬러바로 출처 구분 · 호버 시 상세 표시
+        </span>
+      </div>
+
       {/* 행사 서브 스위처 */}
       <div style={{display:'flex', gap:8, marginTop:24, marginBottom:16, alignItems:'center', flexWrap:'wrap'}}>
         {projects.map(p => {
@@ -4712,6 +4741,16 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                                 const buyer = getBuyer(m.buyerId);
                                 const col = projectColor(buyer?.project || subProject);
                                 const dragging = draggingId === m.id;
+                                // 미팅 출처에 따른 시각적 구분
+                                const isExhibitor = m.source === 'exhibitor_self';
+                                const isAdmin = m.source === 'admin_added' || m.source === 'admin_manual';
+                                const isAuto = !isExhibitor && !isAdmin;
+                                const sourceBar = isExhibitor ? '#06B6D4'   // 청록 — 참가사
+                                                : isAdmin ? '#F59E0B'        // 황금 — 관리자
+                                                : '#9CA3AF';                  // 회색 — 자동
+                                const sourceLabel = isExhibitor ? '참가사 등록'
+                                                  : isAdmin ? '관리자 편성'
+                                                  : '자동 생성 (CSV)';
                                 return (
                                   <div key={m.id}
                                     draggable
@@ -4724,14 +4763,20 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                                     onDragEnd={() => { setDraggingId(null); setDropTarget(null); }}
                                     onClick={()=>{ if (!readOnly) openEdit(m); }}
                                     style={{
-                                      padding:'8px 10px', borderRadius:'var(--radius-sm)', cursor: readOnly ? 'default' : 'grab',
+                                      padding:'8px 10px 8px 12px',
+                                      borderRadius:'var(--radius-sm)',
+                                      cursor: readOnly ? 'default' : 'grab',
                                       background: col.bg, color: col.fg,
+                                      borderLeft: `4px solid ${sourceBar}`,
                                       transition:'all .15s', minHeight:34,
                                       display:'flex', alignItems:'center', justifyContent:'center',
                                       opacity: dragging ? 0.4 : 1,
                                       boxShadow: dragging ? 'none' : '0 1px 2px rgba(0,0,0,0.08)',
+                                      position:'relative',
                                     }}
-                                    title={readOnly ? `${buyer?.companyName || '—'} · ${buyer?.contactName || '—'}` : `${buyer?.companyName || '—'} · ${buyer?.contactName || '—'}\n드래그로 이동 · 클릭으로 편집`}>
+                                    title={readOnly
+                                      ? `${buyer?.companyName || '—'} · ${buyer?.contactName || '—'}\n출처: ${sourceLabel}`
+                                      : `${buyer?.companyName || '—'} · ${buyer?.contactName || '—'}\n출처: ${sourceLabel}\n드래그로 이동 · 클릭으로 편집`}>
                                     <div style={{fontSize:12, fontWeight:600, lineHeight:1.2, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', width:'100%', textAlign:'center'}}>
                                       {buyer?.companyName || '—'}
                                     </div>
