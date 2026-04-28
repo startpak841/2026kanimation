@@ -6681,8 +6681,44 @@ function RsvpTab({state, fullState, update, project, readOnly}){
     return { invited: invited.length, accepted: accepted.length, pending: pending.length, googleForm };
   };
 
-  const respondedBuyers = fullState.buyers
-    .filter(b => b.project === subProject && b.invitationStatus === 'accepted')
+  // 출처별 필터 (ALL = 전체, csv = CSV 업로드, meeting = 미팅 등록, manual = RSVP 수동, exhibitor = 참가사 등록, other = 기타)
+  const [sourceFilter, setSourceFilter] = useState('ALL');
+
+  // 행사별 필터 1차 적용 — 카운트 계산용
+  const buyersByProject = fullState.buyers
+    .filter(b => b.project === subProject && b.invitationStatus === 'accepted');
+
+  // 출처별 카운트
+  const sourceCounts = {
+    ALL: buyersByProject.length,
+    csv: buyersByProject.filter(b => b.source === 'google_form').length,
+    meeting: buyersByProject.filter(b => b.source === 'admin_added').length,
+    manual: buyersByProject.filter(b => b.source === 'manual_rsvp').length,
+    exhibitor: buyersByProject.filter(b => b.source === 'exhibitor_added').length,
+    other: buyersByProject.filter(b => !b.source || (
+      b.source !== 'google_form' &&
+      b.source !== 'admin_added' &&
+      b.source !== 'manual_rsvp' &&
+      b.source !== 'exhibitor_added'
+    )).length,
+  };
+
+  // 출처별 2차 필터 적용
+  const respondedBuyers = buyersByProject
+    .filter(b => {
+      if (sourceFilter === 'ALL') return true;
+      if (sourceFilter === 'csv') return b.source === 'google_form';
+      if (sourceFilter === 'meeting') return b.source === 'admin_added';
+      if (sourceFilter === 'manual') return b.source === 'manual_rsvp';
+      if (sourceFilter === 'exhibitor') return b.source === 'exhibitor_added';
+      if (sourceFilter === 'other') return !b.source || (
+        b.source !== 'google_form' &&
+        b.source !== 'admin_added' &&
+        b.source !== 'manual_rsvp' &&
+        b.source !== 'exhibitor_added'
+      );
+      return true;
+    })
     .sort((a,b) => (a.companyName||'').localeCompare(b.companyName||''));
 
   const createMeeting = (buyer) => {
@@ -6851,6 +6887,52 @@ function RsvpTab({state, fullState, update, project, readOnly}){
         })}
       </div>
 
+      {/* 출처별 필터 탭 — 클릭으로 해당 출처 바이어만 필터링 */}
+      <div style={{
+        display:'flex', gap:6, marginBottom:14, flexWrap:'wrap',
+        padding:'10px 12px', background:'var(--ivory-2)',
+        borderRadius:'var(--radius-sm)', border:'1px solid var(--line)',
+        alignItems:'center',
+      }}>
+        <span className="mono" style={{fontSize:10, letterSpacing:'0.18em', color:'var(--muted)', fontWeight:700, marginRight:6}}>
+          출처별 보기
+        </span>
+        {[
+          {k:'ALL',      l:'전체',         color:'#475569', icon:null},
+          {k:'csv',      l:'CSV 업로드',   color:'#2563EB', icon:<FileSpreadsheet size={11}/>},
+          {k:'meeting',  l:'미팅 등록',    color:'#F59E0B', icon:<Calendar size={11}/>},
+          {k:'manual',   l:'RSVP 수동',    color:'#7C3AED', icon:<Plus size={11}/>},
+          {k:'exhibitor',l:'참가사 등록',  color:'#059669', icon:<User2 size={11}/>},
+          {k:'other',    l:'기타',         color:'#94A3B8', icon:null},
+        ].map(opt => {
+          const active = sourceFilter === opt.k;
+          const count = sourceCounts[opt.k] || 0;
+          if (count === 0 && opt.k !== 'ALL') return null; // 0건이면 표시 안 함 (전체는 항상 표시)
+          return (
+            <button key={opt.k} onClick={()=>setSourceFilter(opt.k)} style={{
+              padding:'5px 11px', borderRadius:999, cursor:'pointer',
+              border: active ? `1px solid ${opt.color}` : '1px solid var(--line)',
+              background: active ? opt.color : 'var(--paper)',
+              color: active ? '#fff' : 'var(--ink-2)',
+              fontSize:11.5, fontWeight:600, fontFamily:'inherit',
+              display:'inline-flex', alignItems:'center', gap:5,
+              transition:'all .15s',
+            }}>
+              {opt.icon}
+              {opt.l}
+              <span className="mono tabular" style={{
+                fontSize:10, padding:'1px 6px', borderRadius:999,
+                background: active ? 'rgba(255,255,255,0.25)' : 'var(--ivory-2)',
+                color: active ? '#fff' : 'var(--muted)',
+                fontWeight:700, marginLeft:1,
+              }}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       <div className="card" style={{overflow:'hidden'}}>
         <div className="scroll-x">
           <table className="mice-table">
@@ -6877,10 +6959,6 @@ function RsvpTab({state, fullState, update, project, readOnly}){
               )}
               {respondedBuyers.map(b => {
                 const hasMeeting = fullState.meetings.some(m => m.buyerId === b.id);
-                const isExhibitorAdded = b.source === 'exhibitor_added';
-                const isGoogleForm = b.source === 'google_form';
-                const isAdminAdded = b.source === 'admin_added';  // 비즈니스 미팅 스케줄로 등록
-                const isManualRsvp = b.source === 'manual_rsvp';  // RSVP 수동 등록
                 return (
                   <tr key={b.id}>
                     <td><ProjectBadge project={b.project}/></td>
@@ -6894,27 +6972,6 @@ function RsvpTab({state, fullState, update, project, readOnly}){
                           <span style={{borderBottom:'1px dotted var(--muted)'}}>{b.companyName}</span>
                           <Eye size={11} style={{color:'var(--muted-2)', flexShrink:0}}/>
                         </div>
-                        {isGoogleForm ? (
-                          <span style={{display:'inline-flex', alignItems:'center', gap:4, padding:'2px 8px', fontSize:9.5, fontWeight:700, background:'#2563EB', color:'#fff', borderRadius:3, letterSpacing:'0.05em'}}>
-                            <FileSpreadsheet size={9}/>CSV 업로드
-                          </span>
-                        ) : isAdminAdded ? (
-                          <span style={{display:'inline-flex', alignItems:'center', gap:4, padding:'2px 8px', fontSize:9.5, fontWeight:700, background:'#F59E0B', color:'#fff', borderRadius:3, letterSpacing:'0.05em'}}>
-                            <Calendar size={9}/>미팅 등록
-                          </span>
-                        ) : isManualRsvp ? (
-                          <span style={{display:'inline-flex', alignItems:'center', gap:4, padding:'2px 8px', fontSize:9.5, fontWeight:700, background:'#7C3AED', color:'#fff', borderRadius:3, letterSpacing:'0.05em'}}>
-                            <Plus size={9}/>RSVP 수동
-                          </span>
-                        ) : isExhibitorAdded ? (
-                          <span style={{display:'inline-flex', alignItems:'center', gap:4, padding:'2px 8px', fontSize:9.5, fontWeight:700, background:'#059669', color:'#fff', borderRadius:3, letterSpacing:'0.05em'}}>
-                            <User2 size={9}/>참가사 등록
-                          </span>
-                        ) : (
-                          <span style={{display:'inline-flex', alignItems:'center', gap:4, padding:'2px 8px', fontSize:9.5, fontWeight:700, background:'var(--ivory-2)', color:'var(--muted)', border:'1px solid var(--line)', borderRadius:3, letterSpacing:'0.05em'}}>
-                            기타
-                          </span>
-                        )}
                       </div>
                       <div style={{fontSize:11.5, color:'var(--muted)', marginTop:3}}>
                         {b.contactName || '—'}{b.email && <> · <span className="mono" style={{fontSize:11}}>{b.email}</span></>}
