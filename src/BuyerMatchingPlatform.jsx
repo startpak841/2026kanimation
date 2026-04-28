@@ -4485,10 +4485,22 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
   const handleDrop = (exId, time) => {
     if (readOnly) return;
     if (!draggingId) return;
-    update(s => ({
-      ...s,
-      meetings: s.meetings.map(m => m.id === draggingId ? {...m, exhibitorId: exId, time, date: selectedDate} : m),
-    }));
+    update(s => {
+      const meeting = s.meetings.find(m => m.id === draggingId);
+      if (!meeting) return s;
+      const newDate = selectedDate;
+      const newTime = time;
+      const newExhId = exId;
+      // 미팅 업데이트
+      const meetings = s.meetings.map(m => m.id === draggingId
+        ? {...m, exhibitorId: newExhId, time: newTime, date: newDate}
+        : m);
+      // 바이어 동기화 — 확정 일정/참가사
+      const buyers = s.buyers.map(b => b.id === meeting.buyerId
+        ? {...b, confirmedDate: newDate, confirmedTime: newTime, confirmedExhibitorId: newExhId}
+        : b);
+      return {...s, meetings, buyers};
+    });
     setDraggingId(null);
     setDropTarget(null);
   };
@@ -4590,10 +4602,18 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
           source: 'admin_manual',
           createdBy: 'admin',
         };
-        return {...s, buyers, meetings: [...s.meetings, newMeeting]};
+        // 바이어 동기화 — 신규 미팅의 일자/시간/참가사를 확정 정보로 저장
+        const buyersFinal = buyers.map(b => b.id === buyerId
+          ? {...b, confirmedDate: modalData.date, confirmedTime: modalData.time, confirmedExhibitorId: modalData.exhibitorId}
+          : b);
+        return {...s, buyers: buyersFinal, meetings: [...s.meetings, newMeeting]};
       } else {
+        // 편집: 미팅 + 바이어 confirmed 정보 동시 업데이트
+        const buyersFinal = buyers.map(b => b.id === buyerId
+          ? {...b, confirmedDate: modalData.date, confirmedTime: modalData.time, confirmedExhibitorId: modalData.exhibitorId}
+          : b);
         return {
-          ...s, buyers,
+          ...s, buyers: buyersFinal,
           meetings: s.meetings.map(m => m.id === modalData.id ? {...m, ...meetingFields} : m)
         };
       }
@@ -6267,7 +6287,11 @@ function BuyerDetailModal({buyer, fullState, onClose, onEdit}){
         <DetailField label="연락처" value={b.phone} mono/>
         <DetailField label="초청 상태" value={statusLabel}/>
         <DetailField label="피칭쇼케이스" value={b.pitchingShowcase || '—'}/>
-        <DetailField label="희망 미팅일" value={(b.preferredDates || []).join(' · ')}/>
+        <DetailField label="희망 미팅일" value={(b.preferredDates || []).join(' · ') || '—'}/>
+        <DetailField label="확정 일정"
+          value={b.confirmedDate
+            ? `${b.confirmedDate}${b.confirmedTime ? ` · ${b.confirmedTime}` : ''}${b.confirmedExhibitorId ? ` · ${(fullState.exhibitors.find(e => e.id === b.confirmedExhibitorId)?.companyName || b.confirmedExhibitorId)}` : ''}`
+            : '—'}/>
         <div style={{gridColumn:'1 / -1'}}>
           <DetailField label="관심 품목 / 주요 사업" value={b.interestedProducts} multiline/>
         </div>
@@ -6707,6 +6731,17 @@ function RsvpTab({state, fullState, update, project, readOnly}){
                 createdBy: 'admin',
               });
               meetingsCreated++;
+
+              // 바이어 confirmed 동기화 — 첫 번째 매칭된 미팅 정보로 (다중 기업 시 가장 빨리 매칭된 것)
+              const bIdx = buyers.findIndex(b => b.id === buyerId);
+              if (bIdx >= 0 && !buyers[bIdx].confirmedDate) {
+                buyers[bIdx] = {
+                  ...buyers[bIdx],
+                  confirmedDate: date,
+                  confirmedTime: slot,
+                  confirmedExhibitorId: exhId,
+                };
+              }
             } else {
               meetingsSkippedNoSlot++;
             }
@@ -7118,11 +7153,52 @@ function RsvpTab({state, fullState, update, project, readOnly}){
                       })()}
                     </td>
                     <td>
-                      {(b.preferredDates && b.preferredDates.length > 0)
-                        ? <div style={{display:'flex', gap:4, flexWrap:'wrap'}}>
-                            {b.preferredDates.map(d => <span key={d} className="mono" style={{fontSize:11, padding:'2px 7px', background:'var(--ivory-2)', borderRadius:4, color:'var(--ink-2)'}}>{d}</span>)}
+                      {(() => {
+                        const hopeDates = (b.preferredDates && b.preferredDates.length > 0) ? b.preferredDates : [];
+                        const confirmedDate = b.confirmedDate;
+                        const confirmedTime = b.confirmedTime;
+
+                        if (hopeDates.length === 0 && !confirmedDate) {
+                          return <span style={{color:'var(--muted-2)', fontSize:12}}>미지정</span>;
+                        }
+
+                        return (
+                          <div style={{display:'flex', flexDirection:'column', gap:3}}>
+                            {/* 확정 일정 (있으면 강조 — 윗줄) */}
+                            {confirmedDate && (
+                              <div style={{display:'flex', alignItems:'center', gap:5, flexWrap:'wrap'}}>
+                                <span style={{fontSize:9, color:'#16A34A', fontWeight:700, letterSpacing:'0.06em'}}>확정</span>
+                                <span className="mono" style={{
+                                  fontSize:11, padding:'2px 7px',
+                                  background:'#DCFCE7', border:'1px solid #16A34A',
+                                  color:'#166534', borderRadius:4, fontWeight:600,
+                                }}>
+                                  {confirmedDate}{confirmedTime ? ` · ${confirmedTime}` : ''}
+                                </span>
+                              </div>
+                            )}
+                            {/* 희망 일정 (배지로 — 아랫줄) */}
+                            {hopeDates.length > 0 && (
+                              <div style={{display:'flex', alignItems:'center', gap:5, flexWrap:'wrap'}}>
+                                <span style={{fontSize:9, color:'var(--muted)', fontWeight:700, letterSpacing:'0.06em'}}>희망</span>
+                                {hopeDates.map(d => {
+                                  const matched = d === confirmedDate;
+                                  return (
+                                    <span key={d} className="mono" style={{
+                                      fontSize:10.5, padding:'2px 7px',
+                                      background: matched ? 'transparent' : 'var(--ivory-2)',
+                                      border: matched ? '1px dashed var(--muted-2)' : '1px solid var(--line)',
+                                      color: matched ? 'var(--muted-2)' : 'var(--ink-2)',
+                                      borderRadius:4,
+                                      textDecoration: matched ? 'line-through' : 'none',
+                                    }}>{d}</span>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
-                        : <span style={{color:'var(--muted-2)', fontSize:12}}>미지정</span>}
+                        );
+                      })()}
                     </td>
                     <td>
                       <div style={{display:'flex', alignItems:'center', gap:6}}>
