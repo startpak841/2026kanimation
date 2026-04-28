@@ -6416,6 +6416,15 @@ function RsvpTab({state, fullState, update, project, readOnly}){
 
   // CSV 파서
   const parseCsv = (text) => {
+    // === 정규화 ===
+    // (1) UTF-8 BOM 제거 (Excel에서 저장한 CSV에 자주 붙음)
+    if (text.charCodeAt(0) === 0xFEFF) {
+      text = text.slice(1);
+    }
+    // (2) 모든 줄바꿈을 \n으로 통일 (CRLF, CR, LF 모두 지원)
+    //     Mac Excel: \r, Windows: \r\n, Unix: \n
+    text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
     const rows = [];
     let cur = '', row = [], inQuote = false;
     for (let i = 0; i < text.length; i++) {
@@ -6428,16 +6437,20 @@ function RsvpTab({state, fullState, update, project, readOnly}){
         if (c === '"') { inQuote = true; }
         else if (c === ',') { row.push(cur); cur = ''; }
         else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
-        else if (c === '\r') { /* skip */ }
         else { cur += c; }
       }
     }
-    if (cur || row.length) { row.push(cur); rows.push(row); }
-    if (rows.length < 2) return [];
-    const headers = rows[0].map(h => h.trim());
-    return rows.slice(1).filter(r => r.some(c => c && c.trim())).map(r => {
+    // 마지막 행 처리 (파일이 줄바꿈 없이 끝나는 경우)
+    if (cur !== '' || row.length > 0) { row.push(cur); rows.push(row); }
+
+    // 빈 행 제거
+    const cleanRows = rows.filter(r => r.some(c => c && String(c).trim() !== ''));
+    if (cleanRows.length < 2) return [];
+
+    const headers = cleanRows[0].map(h => String(h).trim());
+    return cleanRows.slice(1).map(r => {
       const o = {};
-      headers.forEach((h, i) => { o[h] = (r[i] || '').trim(); });
+      headers.forEach((h, i) => { o[h] = String(r[i] || '').trim(); });
       return o;
     });
   };
@@ -6545,6 +6558,43 @@ function RsvpTab({state, fullState, update, project, readOnly}){
       const size = guessBuyerSize(o.companyName);
       if (size) o.companySize = size;
     }
+
+    // 피칭쇼케이스 참석여부 — 다양한 헤더명 인식 + 값 정규화
+    keys.forEach(k => {
+      const v = row[k];
+      if (v === undefined || v === null || String(v).trim() === '') return;
+      const kl = k.toLowerCase().trim();
+      // 헤더 매칭 — 한국어/영어 다양한 표현
+      const isPitchingHeader =
+        kl.includes('피칭') ||
+        kl.includes('쇼케이스') ||
+        kl === 'pitching showcase' ||
+        kl === 'pitchingshowcase' ||
+        kl === 'pitching' ||
+        kl === 'showcase' ||
+        kl.includes('pitching showcase') ||
+        kl.includes('피칭 쇼케이스') ||
+        kl.includes('피칭쇼케이스');
+      if (isPitchingHeader && !o.pitchingShowcase) {
+        const vs = String(v).trim();
+        const vl = vs.toLowerCase();
+        // 값 정규화 — 다양한 표현을 표준 3가지로
+        if (['참석', 'o', '○', '◯', 'y', 'yes', '참가', '참여', '참석함', 'attend', 'attending', 'true', '✓'].includes(vl)
+          || vl.includes('참석') || vl.includes('attend')) {
+          o.pitchingShowcase = '참석';
+        } else if (['불참', 'x', '×', 'n', 'no', '참석안함', '불참석', '참여안함', 'decline', 'not attend', 'false'].includes(vl)
+          || vl.includes('불참') || vl.includes('decline') || vl === 'x' || vl === '×') {
+          o.pitchingShowcase = '불참';
+        } else if (['미정', 'tbd', 'pending', '검토중', '확인중', '?', 'maybe'].includes(vl)
+          || vl.includes('미정') || vl.includes('tbd') || vl.includes('검토')) {
+          o.pitchingShowcase = '미정';
+        } else {
+          // 그 외: 값 자체를 그대로 (예: 빈 값이 아닌 의미 있는 텍스트)
+          o.pitchingShowcase = vs;
+        }
+      }
+    });
+
     return o;
   };
 
@@ -6555,6 +6605,11 @@ function RsvpTab({state, fullState, update, project, readOnly}){
     const mapped = rows.map(r => mapFormRowToBuyer(r, p)).filter(b => b.companyName);
     if (mapped.length === 0) {
       throw new Error(`파싱 가능한 행이 없습니다. 회사명 열이 인식되지 않았을 수 있습니다.\n감지된 헤더: ${Object.keys(rows[0] || {}).slice(0, 8).join(', ')}`);
+    }
+    // 디버그 정보 — 파싱은 됐는데 회사명이 비어 처리 못한 행이 있으면 경고
+    const skippedNoName = rows.length - mapped.length;
+    if (skippedNoName > 0) {
+      console.warn(`[CSV] 전체 ${rows.length}행 중 ${skippedNoName}행이 회사명 누락으로 건너뜀`);
     }
     let added = 0, updated = 0, meetingsCreated = 0, meetingsSkippedNotInterested = 0, meetingsSkippedNoSlot = 0, meetingsSkippedUnmatched = 0;
     const eventConfig = EVENT_CONFIG[p];
@@ -6589,6 +6644,8 @@ function RsvpTab({state, fullState, update, project, readOnly}){
             interestedProducts: existing.interestedProducts || nb.interestedProducts,
             preferredDates: (existing.preferredDates && existing.preferredDates.length) ? existing.preferredDates : nb.preferredDates,
             categories: mergedCats,
+            // 피칭쇼케이스 — CSV에 새 값 있으면 갱신, 없으면 기존 유지
+            pitchingShowcase: nb.pitchingShowcase || existing.pitchingShowcase || '',
             invitationStatus: 'accepted',
             source: existing.source || 'google_form',
           };
@@ -6601,40 +6658,59 @@ function RsvpTab({state, fullState, update, project, readOnly}){
           added++;
         }
 
-        // (2) 자동 미팅 편성 — 6번(참가사) + 7번(날짜) 모두 유효하면
+        // (2) 자동 미팅 편성 — 한 셀에 여러 기업 명시 가능 (쉼표·세미콜론·슬래시·줄바꿈·파이프)
         if (nb.desiredExhibitorName && nb.preferredDates && nb.preferredDates[0]) {
-          const exhId = mapExhibitorNameToId(nb.desiredExhibitorName, exhibitors, p);
-          if (exhId === 'NOT_INTERESTED') {
-            meetingsSkippedNotInterested++;
-          } else if (!exhId) {
-            meetingsSkippedUnmatched++;
-          } else {
-            const date = nb.preferredDates[0];
-            // 동일 바이어-참가사-날짜 미팅이 이미 있으면 중복 편성 방지
+          // 다중 기업 분리 — 다양한 구분자 모두 지원
+          const exhibitorNames = String(nb.desiredExhibitorName)
+            .split(/[,;|\/\n]/)         // 쉼표, 세미콜론, 슬래시, 줄바꿈, 파이프
+            .map(s => s.trim())
+            .filter(s => s.length > 0);
+
+          const date = nb.preferredDates[0];
+          const handledExhIds = new Set(); // 동일 CSV 행 내 같은 참가사 중복 방지
+
+          exhibitorNames.forEach(exhName => {
+            const exhId = mapExhibitorNameToId(exhName, exhibitors, p);
+            if (exhId === 'NOT_INTERESTED') {
+              meetingsSkippedNotInterested++;
+              return;
+            }
+            if (!exhId) {
+              meetingsSkippedUnmatched++;
+              console.warn(`[CSV] 매칭 실패: "${exhName}" — 등록된 참가사 명단 확인 필요`);
+              return;
+            }
+            // 같은 행 내 중복 (예: "climax, climax") 방지
+            if (handledExhIds.has(exhId)) return;
+            handledExhIds.add(exhId);
+
+            // DB 측 동일 바이어-참가사-날짜 미팅 중복 방지
             const exists = meetings.some(m =>
               m.exhibitorId === exhId && m.buyerId === buyerId && m.date === date
             );
-            if (!exists) {
-              const slot = findFirstAvailableSlot(exhId, date, meetings, eventConfig);
-              if (slot) {
-                meetings.push({
-                  id: `MT-AUTO-${Date.now()}-${meetingsCreated}`,
-                  exhibitorId: exhId,
-                  buyerId,
-                  date,
-                  time: slot,
-                  table: `A-${String(meetings.length + 1).padStart(2,'0')}`,
-                  status: 'confirmed',
-                  notes: '구글폼 응답 기반 자동 편성',
-                  source: 'rsvp_auto',
-                  createdBy: 'admin',
-                });
-                meetingsCreated++;
-              } else {
-                meetingsSkippedNoSlot++;
-              }
+            if (exists) return;
+
+            const slot = findFirstAvailableSlot(exhId, date, meetings, eventConfig);
+            if (slot) {
+              meetings.push({
+                id: `MT-AUTO-${Date.now()}-${meetingsCreated}-${Math.random().toString(36).slice(2,5)}`,
+                exhibitorId: exhId,
+                buyerId,
+                date,
+                time: slot,
+                table: `A-${String(meetings.length + 1).padStart(2,'0')}`,
+                status: 'confirmed',
+                notes: exhibitorNames.length > 1
+                  ? `구글폼 응답 기반 자동 편성 (다중 기업 ${exhibitorNames.length}개 중 ${exhName})`
+                  : '구글폼 응답 기반 자동 편성',
+                source: 'rsvp_auto',
+                createdBy: 'admin',
+              });
+              meetingsCreated++;
+            } else {
+              meetingsSkippedNoSlot++;
             }
-          }
+          });
         }
       });
 
@@ -6653,24 +6729,60 @@ function RsvpTab({state, fullState, update, project, readOnly}){
     if (!file) return;
     setSyncing(p);
     setSyncError(e => ({...e, [p]: null}));
-    const reader = new FileReader();
-    reader.onload = (ev) => {
+
+    // 한글 깨짐 감지 함수 — 깨진 한글 패턴이 많으면 EUC-KR로 재시도
+    const isProbablyMojibake = (text) => {
+      // UTF-8로 EUC-KR 텍스트를 읽으면  (0xFFFD) 문자가 자주 나타남
+      const replacementChars = (text.match(/\uFFFD/g) || []).length;
+      // 한글 문자가 거의 없는데 텍스트가 많으면 의심
+      const koreanChars = (text.match(/[\uAC00-\uD7AF]/g) || []).length;
+      return replacementChars > 5 || (text.length > 200 && koreanChars === 0 && /[가-힣]/.test(file.name));
+    };
+
+    const tryParse = (text) => {
       try {
-        const text = ev.target.result;
         const result = mergeCsvToDb(text, p);
         setSyncResult({ project: p, ...result, ts: new Date(), via: 'file' });
         setTimeout(() => setSyncResult(null), 12000);
-      } catch (e) {
-        setSyncError(err => ({...err, [p]: e.message || String(e)}));
-      } finally {
         setSyncing(null);
+        return true;
+      } catch (e) {
+        return e;
       }
     };
-    reader.onerror = () => {
+
+    // 1차 시도: UTF-8
+    const reader1 = new FileReader();
+    reader1.onload = (ev) => {
+      const text = ev.target.result;
+      if (isProbablyMojibake(text)) {
+        // 한글 깨짐 감지 → EUC-KR로 재시도
+        const reader2 = new FileReader();
+        reader2.onload = (ev2) => {
+          const r = tryParse(ev2.target.result);
+          if (r !== true) {
+            setSyncError(err => ({...err, [p]: r.message || String(r)}));
+            setSyncing(null);
+          }
+        };
+        reader2.onerror = () => {
+          setSyncError(err => ({...err, [p]: 'CSV 파일을 읽는데 실패했습니다.'}));
+          setSyncing(null);
+        };
+        reader2.readAsText(file, 'EUC-KR');
+      } else {
+        const r = tryParse(text);
+        if (r !== true) {
+          setSyncError(err => ({...err, [p]: r.message || String(r)}));
+          setSyncing(null);
+        }
+      }
+    };
+    reader1.onerror = () => {
       setSyncError(err => ({...err, [p]: 'CSV 파일을 읽는데 실패했습니다.'}));
       setSyncing(null);
     };
-    reader.readAsText(file, 'UTF-8');
+    reader1.readAsText(file, 'UTF-8');
   };
 
   const projectStats = (p) => {
