@@ -211,6 +211,7 @@ function formatRuntimeSummary(ip){
 const BUYER_CATEGORIES = [
   'Broadcaster (방송사)',
   'Streaming / OTT 플랫폼',
+  'Media / Press (언론 · 미디어)',
   'Production (제작사)',
   'Distributor (배급사)',
   'Licensee (MD · 출판 · 상품화)',
@@ -388,27 +389,137 @@ function generateTimeSlots(start, end, mins){
 
 // ============================ 회사명 → 분야 자동 추정 ============================
 const FIELD_KEYWORDS = [
-  { keywords:['netflix','disney+','disneyplus','hbo','max','prime video','amazon prime','apple tv','hulu','paramount+','peacock','discovery+','tving','wavve','coupang play','rakuten tv','crunchyroll','viu','iqiyi','iq.com','youku','tencent video'],
+  // ─── Streaming / OTT 플랫폼 ─────────────────────────────────────
+  { keywords:[
+      'netflix','disney+','disneyplus','disney plus','hbo','hbo max','max','prime video','amazon prime',
+      'apple tv','hulu','paramount+','paramount plus','peacock','discovery+','tving','wavve',
+      'coupang play','rakuten tv','crunchyroll','viu','iqiyi','iq.com','youku','tencent video',
+      'streaming','ott','vod','svod','avod','digital platform','online platform',
+      'roku','tubi','plex','pluto tv','kocowa','viki','catch up tv','watch on demand',
+    ],
     field:'OTT / 스트리밍 플랫폼', category:'Streaming / OTT 플랫폼' },
-  { keywords:['bbc','nhk','zdf','ard','arte','rai','cbs','abc','nbc','fox','cbc','cctv','kbs','mbc','sbs','tvn','jtbc','ebs','itv','canal+','france 2','france 3','france 5','tbs ','mediacorp','astro'],
+
+  // ─── Broadcaster (방송사) ─────────────────────────────────────
+  { keywords:[
+      'bbc','nhk','zdf','ard','arte','rai','cbs','abc','nbc','fox',
+      'cbc','cctv','kbs','mbc','sbs','tvn','jtbc','ebs','itv','canal+',
+      'france 2','france 3','france 5','france tv','france télévisions','tbs ','mediacorp','astro',
+      'channel','channel 4','channel 5','channel one','tve','rte','rtve','svt','dr','yle','nrk','rts',
+      'broadcasting','broadcaster','television','tv network','public service','national tv',
+      'rtl','prosieben','sky','tf1','m6 ','bell media','rogers','ctv','global tv',
+      'globo','televisa','tv azteca','sbs ','seven network','nine network','abc australia',
+      '방송','방송국','텔레비전','tv ','tv,','tv.','-tv',
+    ],
     field:'방송사', category:'Broadcaster (방송사)' },
-  { keywords:['distribution','distributor','mediamond','mondo','televisa','mediatoon','banijay','all3media','fremantle','sphere','zodiak','studio 100','cyber group','m6','pgs'],
+
+  // ─── Media / Press (언론 · 미디어) ─────────────────────────────
+  { keywords:[
+      // 영문 — 언론·미디어·매거진·잡지·신문
+      'media','press','news','newspaper','magazine','journal','journalism','journalist',
+      'editorial','reporter','correspondent','newsroom','news agency',
+      'variety','hollywood reporter','deadline','indiewire','animation magazine','animation world',
+      'kidscreen','c21media','c21','televisual','broadcast magazine','license global',
+      'cynopsis','rapid tv news','tbi vision','realscreen','playback',
+      'le figaro','le monde','reuters','associated press','bloomberg','wsj','wall street journal',
+      'financial times','ft.com','nikkei','asahi','yomiuri','mainichi','xinhua','people\'s daily',
+      'forbes','fortune','wired','techcrunch','bloomberg media','engadget','the verge','axios',
+      // 한국 — 언론·매체
+      '언론','매체','미디어','신문','잡지','일보','신보','매일경제','한국경제','조선일보','중앙일보','동아일보',
+      '한겨레','경향신문','연합뉴스','뉴시스','뉴스1','이데일리','머니투데이','블로터','지디넷',
+      '기자','편집국','보도국','뉴스룸','월간','주간',
+      // 일반 미디어 키워드
+      'communications','comms','public relations','pr agency','pr firm','대외협력',
+    ],
+    field:'언론 · 미디어', category:'Media / Press (언론 · 미디어)' },
+
+  // ─── Distributor (배급사) ─────────────────────────────────────
+  { keywords:[
+      'distribution','distributor','distributors','배급사','배급','distribuzione','distribuidora',
+      'mediamond','mondo','televisa','mediatoon','banijay','all3media','fremantle','sphere','zodiak',
+      'studio 100','cyber group','m6 ','pgs','dandelooo','gaumont','wild bunch','metropolitan',
+      'pathé','europacorp','gravier','atresmedia','planeta junior','federation','imagine kids',
+      'nelvana','9 story','wildbrain','dhx','ent. one','entertainment one','sky vision',
+      'red arrow','endemol shine','content',
+    ],
     field:'배급사', category:'Distributor (배급사)' },
-  { keywords:['production','productions','studios','studio','toei','ghibli','pixar','dreamworks','illumination','mappa','wit studio','bones','trigger','dentsu','sunrise','madhouse','kyoto animation','polygon pictures','production ig','aniplex','nippon animation','oriental light','j.c.staff','p.a. works','shaft','ufotable','cloverworks','a-1 pictures','studio 4°c','animation studios','animation production','제작사','프로덕션','스튜디오'],
+
+  // ─── Production (제작사 / 애니메이션 스튜디오) ─────────────────
+  { keywords:[
+      'production','productions','studios','studio','제작사','프로덕션','스튜디오',
+      'toei','ghibli','pixar','dreamworks','illumination','mappa','wit studio','bones','trigger',
+      'dentsu','sunrise','madhouse','kyoto animation','polygon pictures','production ig','aniplex',
+      'nippon animation','oriental light','j.c.staff','p.a. works','shaft','ufotable','cloverworks',
+      'a-1 pictures','studio 4°c','studio 4c','animation studios','animation production',
+      'cartoon saloon','laika','aardman','blue sky','sony pictures animation','warner animation',
+      'disney animation','locksmith','illumination mac guff','folimage','xilam','tat productions',
+      'motion picture','live action','live-action',' film ',' films ','filmes','filmaker','filmmaker',
+      'creative studio','content studio','toon','toonbox','rough draft','reel fx','jam filled',
+      'mercury filmworks','atomic cartoons','industrial light','ilm','marvel studios',
+    ],
     field:'제작사 / 애니메이션 스튜디오', category:'Production (제작사)' },
-  { keywords:['co-production','co production','coproduction','공동제작','joint production','co-prod'],
+
+  // ─── Co-Production Partner (공동제작) ─────────────────────────
+  { keywords:[
+      'co-production','co production','coproduction','공동제작','joint production','co-prod',
+      'co-producer','coproducer','공동 제작','partnership',
+    ],
     field:'공동제작 파트너', category:'Co-Production Partner (공동제작)' },
-  { keywords:['toy','toys','bandai','mattel','hasbro','spin master','lego','takara','tomy','playmates','moose','mga'],
+
+  // ─── Licensee (MD · 출판 · 상품화) ─────────────────────────────
+  { keywords:[
+      'toy','toys','toymaker','bandai','mattel','hasbro','spin master','lego','takara','tomy',
+      'playmates','moose','mga','licensee','licensing','license','consumer products',
+      'mga entertainment','epoch','jazwares','funko','playmobil','vtech','nintendo of',
+      'kids product','kids products','매장','상품화','캐릭터 상품',
+    ],
     field:'완구 / 라이선시', category:'Licensee (MD · 출판 · 상품화)' },
-  { keywords:['publishing','publisher','kodansha','shueisha','shogakukan','scholastic','penguin','random house','hachette','harper','simon & schuster','bloomsbury'],
+
+  // ─── Publisher (퍼블리셔) ─────────────────────────────────────
+  { keywords:[
+      'publishing','publisher','publishing house','출판','출판사','editora','éditions','editoriale',
+      'kodansha','shueisha','shogakukan','scholastic','penguin','random house','hachette','harper',
+      'simon & schuster','bloomsbury','dk books','egmont','carlsen','glenat','glenát','gimle',
+      'usborne','walker books','little brown','macmillan','pan macmillan','candlewick',
+      'media factory','kadokawa','square enix book','manga','comic','comics','graphic novel',
+      'children book','children\'s book','picture book','board book',
+    ],
     field:'출판 / 퍼블리셔', category:'Publisher (퍼블리셔)' },
-  { keywords:['sales','rights','licensing','agent','cake','4k media','sphere entertainment','mondo tv','content asia'],
+
+  // ─── Global Sales Agent (세일즈 에이전트) ─────────────────────
+  { keywords:[
+      'sales','rights','licensing agent','agent','agency','rights manager',
+      'cake','4k media','sphere entertainment','mondo tv','content asia',
+      'global sales','international sales','distribution rights','format sales',
+      'm4e','tinopolis','superights','gaumont distribution','federation rights',
+      'world sales','content rights','new content',
+    ],
     field:'글로벌 세일즈', category:'Global Sales Agent (세일즈 에이전트)' },
-  { keywords:['ventures','capital','partners','investment','fund ','equity','holdings'],
+
+  // ─── Investor (투자사) ─────────────────────────────────────
+  { keywords:[
+      'ventures','capital','partners','investment','investments','fund ',' fund','funds',
+      'equity','holdings','investing','investor','investors','vc ','private equity',
+      ' lp,','llc','venture','growth fund','seed fund','accelerator','incubator',
+      '투자사','투자','벤처','캐피탈','지분','자본','financière','financiere',
+    ],
     field:'투자사', category:'Investor (투자사)' },
-  { keywords:['localization','dubbing','subtitle','voice','iyuno','zoo digital','sdi media'],
+
+  // ─── Localization (로컬라이제이션 · 더빙) ─────────────────────
+  { keywords:[
+      'localization','localisation','dubbing','subtitle','subtitles','voice over','voiceover',
+      'iyuno','zoo digital','sdi media','deluxe','vsi','keywords studios','plint','ezdrm',
+      'audio post','post production','post-production','sound design','adr ','recording studio',
+      '더빙','자막','로컬라이제이션',
+    ],
     field:'로컬라이제이션 / 더빙', category:'Localization (로컬라이제이션 · 더빙)' },
-  { keywords:['merchandise','merchandising','brand','consumer products'],
+
+  // ─── Merchandising Partner (머천다이징) ─────────────────────
+  { keywords:[
+      'merchandise','merchandising','brand','brands','consumer products','retail',
+      'merchant','merch ','character goods','character merchandise',
+      'apparel','clothing brand','accessories','collectibles','collectible',
+      '머천다이징','캐릭터','굿즈','상품',
+    ],
     field:'머천다이징', category:'Merchandising Partner (머천다이징)' },
 ];
 
@@ -1169,10 +1280,44 @@ const css = `
 `;
 
 // ============================ APP SHELL ============================
+const AUTH_STORAGE_KEY = 'kags_auth_session_v1';
+
+// sessionStorage에서 auth 복원 (새로고침 시 로그인 유지)
+function loadAuthFromStorage() {
+  try {
+    if (typeof window === 'undefined' || !window.sessionStorage) return null;
+    const raw = window.sessionStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    // 형식 검증: role 필드는 반드시 있어야 함
+    if (parsed && (parsed.role === 'exhibitor' || parsed.role === 'admin')) {
+      return parsed;
+    }
+    return null;
+  } catch { return null; }
+}
+
+function saveAuthToStorage(auth) {
+  try {
+    if (typeof window === 'undefined' || !window.sessionStorage) return;
+    if (auth) {
+      window.sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
+    } else {
+      window.sessionStorage.removeItem(AUTH_STORAGE_KEY);
+    }
+  } catch { /* 무시 */ }
+}
+
 export default function BuyerMatchingPlatform() {
   const [state, setState] = useState(null);
-  const [auth, setAuth] = useState(null); // {role:'exhibitor'|'admin', userId?}
+  const [auth, setAuthRaw] = useState(() => loadAuthFromStorage()); // {role:'exhibitor'|'admin', userId?}
   const [syncIndicator, setSyncIndicator] = useState(null); // 동기화 피드백 UI
+
+  // setAuth 래퍼: sessionStorage에도 자동 저장
+  const setAuth = (newAuth) => {
+    setAuthRaw(newAuth);
+    saveAuthToStorage(newAuth);
+  };
 
   useEffect(() => { loadState().then(setState); }, []);
 
@@ -1244,6 +1389,16 @@ export default function BuyerMatchingPlatform() {
       </div>
     );
   }
+
+  // 복원된 참가사 userId가 현재 DB에 없으면 자동 로그아웃 (참가사 삭제된 경우 등)
+  useEffect(() => {
+    if (auth?.role === 'exhibitor' && state?.exhibitors) {
+      const exists = state.exhibitors.some(e => e.id === auth.userId);
+      if (!exists) {
+        setAuth(null);
+      }
+    }
+  }, [auth, state?.exhibitors]);
 
   return (
     <div className="mice-root">
@@ -1900,7 +2055,7 @@ function IPsTab({me, update}){
   return (
     <div className="fade-in">
       <SectionHeader eyebrow="SECTION 03" title="IP 소개 · 희망 바이어 설정"
-        desc="참가사 보유 IP를 개별 등록하고, 각 IP별로 장르·포맷·타겟을 기입해주세요. IP 영문 제목과 영문 소개(400자 이내)는 글로벌 바이어에게 배포될 프로그램북에 그대로 노출되므로 영문으로 정확히 작성해주세요. 희망 바이어 카테고리(1~4순위)와 타겟 권역은 매칭 엔진에 즉시 반영됩니다." />
+        desc="참가사 보유 IP를 개별 등록하고, 각 IP별로 장르·포맷·타겟을 기입해주세요. IP 영문 제목과 영문 소개(600자 이내)는 글로벌 바이어에게 배포될 프로그램북에 그대로 노출되므로 영문으로 정확히 작성해주세요. 희망 바이어 카테고리(1~4순위)와 타겟 권역은 매칭 엔진에 즉시 반영됩니다." />
 
       {/* 영문 작성 안내 배너 */}
       <div style={{
@@ -1915,8 +2070,8 @@ function IPsTab({me, update}){
         <div>
           <strong>Please write in English · 영문 작성 필수</strong>
           <div style={{fontSize:11.5, color:'var(--ink-2)', marginTop:3}}>
-            IP Name (English), IP Introduction (400 characters max in English) will be shared with global buyers in official program book & pitching materials.
-            <br/>IP 영문명과 영문 소개(400자 이내)는 글로벌 바이어 배포용 공식 프로그램북·피칭 자료에 직접 게재됩니다.
+            IP Name (English), IP Introduction (600 characters max in English) will be shared with global buyers in official program book & pitching materials.
+            <br/>IP 영문명과 영문 소개(600자 이내)는 글로벌 바이어 배포용 공식 프로그램북·피칭 자료에 직접 게재됩니다.
           </div>
         </div>
       </div>
@@ -2041,14 +2196,14 @@ function IPsTab({me, update}){
             </div>
             <div style={{gridColumn:'1 / -1'}}>
               <label className="label" style={{display:'flex', alignItems:'center', justifyContent:'space-between'}}>
-                <span>IP Introduction <span style={{color:'var(--muted)', fontWeight:400, marginLeft:4}}>· 영문 400자 이내 작성</span></span>
+                <span>IP Introduction <span style={{color:'var(--muted)', fontWeight:400, marginLeft:4}}>· 영문 600자 이내 작성</span></span>
                 {(() => {
                   const count = (form.introEn || '').length;
-                  const over = count > 400;
-                  const warning = !over && count > 350;
+                  const over = count > 600;
+                  const warning = !over && count > 550;
                   return (
                     <span className="mono tabular" style={{fontSize:10.5, fontWeight:500, color: over ? 'var(--red)' : (warning ? 'var(--amber)' : 'var(--muted)')}}>
-                      {count} / 400
+                      {count} / 600
                     </span>
                   );
                 })()}
@@ -2168,14 +2323,14 @@ function IPsTab({me, update}){
           <IPImageUploader form={form} setForm={setForm}/>
 
           <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:24, gap:12}}>
-            <div style={{fontSize:11, color: (form.introEn || '').length > 400 ? 'var(--red)' : 'var(--muted-2)', lineHeight:1.5}}>
-              {(form.introEn || '').length > 400
-                ? `⚠️ IP Introduction이 400자를 ${(form.introEn || '').length - 400}자 초과했습니다.`
+            <div style={{fontSize:11, color: (form.introEn || '').length > 600 ? 'var(--red)' : 'var(--muted-2)', lineHeight:1.5}}>
+              {(form.introEn || '').length > 600
+                ? `⚠️ IP Introduction이 600자를 ${(form.introEn || '').length - 600}자 초과했습니다.`
                 : '모든 입력 내용은 저장 후 운영 사무국 및 글로벌 바이어에게 공유됩니다.'}
             </div>
             <div style={{display:'flex', gap:8}}>
               <button className="btn btn-ghost" onClick={()=>{setEditingId(null); setForm(null);}}>취소</button>
-              <button className="btn btn-primary" onClick={save} disabled={(form.introEn || '').length > 400}>
+              <button className="btn btn-primary" onClick={save} disabled={(form.introEn || '').length > 600}>
                 <Save size={14}/>저장
               </button>
             </div>
@@ -3342,6 +3497,15 @@ function BuyersTab({state, fullState, update, project, readOnly}){
         'streamingott플랫폼':                 'Streaming / OTT 플랫폼',
         'ott':                              'Streaming / OTT 플랫폼',
         'ott플랫폼':                         'Streaming / OTT 플랫폼',
+        'media':                            'Media / Press (언론 · 미디어)',
+        'press':                            'Media / Press (언론 · 미디어)',
+        'mediapress':                       'Media / Press (언론 · 미디어)',
+        'mediapress언론미디어':                'Media / Press (언론 · 미디어)',
+        'media언론':                         'Media / Press (언론 · 미디어)',
+        'press언론':                         'Media / Press (언론 · 미디어)',
+        '언론':                              'Media / Press (언론 · 미디어)',
+        '미디어':                            'Media / Press (언론 · 미디어)',
+        '언론미디어':                         'Media / Press (언론 · 미디어)',
         'distributor':                      'Distributor (배급사)',
         'distributor배급사':                  'Distributor (배급사)',
         'production':                       'Production (제작사)',
@@ -3530,12 +3694,13 @@ function BuyersTab({state, fullState, update, project, readOnly}){
   };
 
   const downloadTemplate = () => {
-    // 업로드 파일 구조 — 프로젝트 + 22개 컬럼
+    // 업로드 파일 구조 — 프로젝트 + 23개 컬럼 (Media/Press 추가)
     const headers = [
       '프로젝트\n(MIFA / MIPCOM / CANADA)',
       '국가', '회사명', '담당자', '직급', '연락처', '이메일',
       'Broadcaster\n(방송사)',
       'Streaming/OTT\n(OTT 플랫폼)',
+      'Media/Press\n(언론 · 미디어)',
       'Distributor\n(배급사)',
       'Production\n(제작사)',
       'Co-Production\n(공동제작)',
@@ -3552,36 +3717,36 @@ function BuyersTab({state, fullState, update, project, readOnly}){
       '피칭쇼케이스\n(참석/불참/미정)',
       '초청상태',
     ];
-    // 샘플 3개 — 다양한 프로젝트·카테고리 조합 시연
+    // 샘플 3개 — 다양한 프로젝트·카테고리 조합 시연 (Media/Press 컬럼 빈 값 자리 추가)
     const sample1 = ['MIFA', 'France', 'Sample Broadcaster + OTT', 'Jane Leclerc', 'Head of Acquisitions', '+33-1-4200-0000', 'jane@sample.fr',
-      'O', 'O', '',  '', '', '', '', '', '', '', '', '',
+      'O', 'O', '',  '',  '', '', '', '', '', '', '', '', '',
       '공영방송 + 자체 OTT 플랫폼 · 키즈 · 애니메이션 편성', '대기업', '시리즈 52x11′',
       '액션/어드벤처, 코미디, 판타지', 'TV 시리즈, 디지털 / 숏폼', '키즈 (5-8), 패밀리 (All-Ages), 틴 (9-14)',
       'EU, NA',
       '참석',
       ''];
     const sample2 = ['MIPCOM', 'Japan', 'Sample Animation Studio', 'Yuki Tanaka', 'Producer', '+81-3-0000-0000', 'tanaka@sample.jp',
-      '', '', '',  'O', 'O', '', '', '', '', '', '', '',
+      '', '', '',  '',  'O', 'O', '', '', '', '', '', '', '',
       '3D CG 애니메이션 스튜디오 · 공동제작 경험 다수', '중견', '극장판·시리즈 공동제작',
       '액션/어드벤처, SF, 판타지', '장편 극장판, TV 시리즈', '틴 (9-14), YA (15-18)',
       'AS, Global',
       '미정',
       ''];
-    const sample3 = ['CANADA', 'USA', 'Sample Licensee + Merchandising', 'John Doe', 'VP Licensing', '+1-310-555-0100', 'john@sample.com',
-      '', '', '',  '', '', '', '', '', 'O', '', 'O', '',
-      '완구·퍼블리싱·MD 종합 라이선싱', '대기업', '완구·출판·어패럴',
-      '코미디, 판타지', 'IP 라이선싱', '유아 (0-4), 키즈 (5-8), 패밀리 (All-Ages)',
-      'NA',
-      '불참',
+    const sample3 = ['CANADA', 'USA', 'Sample Animation Trade Magazine', 'John Doe', 'Editor-in-Chief', '+1-310-555-0100', 'john@sample.com',
+      '', '', 'O',  '',  '', '', '', '', '', '', '', '', '',
+      '글로벌 애니메이션 산업 트렌드·계약·인사 보도', '중견', '취재·인터뷰·산업 리포트',
+      '액션/어드벤처, 코미디, SF', 'TV 시리즈, 장편 극장판, 디지털 / 숏폼', '전 연령',
+      'NA, Global',
+      '참석',
       ''];
     const aoa = [headers, sample1, sample2, sample3];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    // 컬럼 너비 설정 (프로젝트 컬럼 추가됨)
+    // 컬럼 너비 설정 (Media/Press 컬럼 추가됨)
     ws['!cols'] = [
       {wch:12},  // 프로젝트
       {wch:12}, {wch:36}, {wch:22}, {wch:22}, {wch:16}, {wch:28},
-      {wch:12}, {wch:12}, {wch:12}, {wch:12}, {wch:12}, {wch:12},
-      {wch:12}, {wch:14}, {wch:14}, {wch:14}, {wch:12}, {wch:10},
+      {wch:12}, {wch:12}, {wch:12}, {wch:12}, {wch:12}, {wch:12}, {wch:12},
+      {wch:14}, {wch:14}, {wch:14}, {wch:14}, {wch:12}, {wch:10},
       {wch:40}, {wch:10}, {wch:24},
       {wch:26}, {wch:22}, {wch:28}, {wch:24},
       {wch:14},
@@ -6033,7 +6198,7 @@ function IPDetailBlock({ip, idx, exhibitor, readOnly}){
         </div>
       </div>
 
-      {/* IP Introduction (영문 400자) — 관리자용 */}
+      {/* IP Introduction (영문 600자) — 관리자용 */}
       {ip.introEn && (
         <div style={{marginBottom:14, padding:'12px 14px', background:'var(--ivory-2)', borderRadius:'var(--radius-sm)', border:'1px solid var(--line-2)'}}>
           <div className="mono" style={{fontSize:9.5, letterSpacing:'0.15em', color:'var(--muted)', marginBottom:5, fontWeight:600, display:'flex', alignItems:'center', gap:5}}>
@@ -6225,6 +6390,7 @@ function NumberWithHint({value, onChange, placeholder='', hint='', unit='', max}
 const CATEGORY_PALETTE = {
   'Broadcaster (방송사)':                   '#DC2626', // Red 600 — 방송의 상징적 레드
   'Streaming / OTT 플랫폼':                 '#2563EB', // Blue 600 — 디지털 플랫폼
+  'Media / Press (언론 · 미디어)':           '#0F766E', // Teal 700 — 정보·저널리즘
   'Production (제작사)':                    '#EA580C', // Orange 600 — 창작·제작의 열정
   'Distributor (배급사)':                   '#D97706', // Amber 600 — 유통의 골드톤
   'Licensee (MD · 출판 · 상품화)':          '#059669', // Emerald 600 — 라이선스 비즈니스
@@ -6241,6 +6407,10 @@ const CATEGORY_FALLBACK = {
   'Broadcaster':   '#DC2626',
   'Streaming':     '#2563EB',
   'OTT':           '#2563EB',
+  'Media':         '#0F766E',
+  'Press':         '#0F766E',
+  '언론':          '#0F766E',
+  '미디어':         '#0F766E',
   'Production':    '#EA580C',
   '제작사':         '#EA580C',
   'Distributor':   '#D97706',
