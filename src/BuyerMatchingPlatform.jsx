@@ -1024,6 +1024,10 @@ const css = `
     .kpi-grid-5 { grid-template-columns: repeat(2, 1fr) !important; }
     /* 대시보드 2칼럼 섹션 — 모바일 1열 */
     .kpi-grid-2 { grid-template-columns: 1fr !important; }
+    /* 바이어 DB Excel 일괄 업로드 — 모바일 1열 + 컴팩트 */
+    .bulk-upload-grid { grid-template-columns: 1fr !important; gap: 12px !important; }
+    .bulk-upload-card { padding: 14px !important; }
+    .bulk-upload-icon { width: 40px !important; height: 40px !important; }
     /* 메인 컨테이너 padding 축소 */
     main { padding: 24px 16px !important; }
 
@@ -2224,7 +2228,10 @@ function SurveyTab({me, update}){
       <SectionHeader eyebrow="SECTION 04" title="참가사 수요조사 (On-site Survey)"
         desc="출장 및 현장 운영을 위한 정보를 수집합니다. 주민등록번호 등 민감정보는 여행자 보험 가입 등 공식 용도에만 사용되며 사업 종료 후 30일 이내 안전하게 파기됩니다." />
 
-      <QBox num={1} icon={<Languages size={14}/>} title="통역 필요 여부">
+      <QBox num={1} icon={<Languages size={14}/>} title="MIFA 기간 동안 현장 통역 필요 여부">
+        <div style={{fontSize:12, color:'var(--muted)', marginBottom:10, lineHeight:1.6}}>
+          MIFA 행사 기간 동안 비즈니스 미팅·피칭 쇼케이스 등 현장에서 한↔영(또는 한↔불) 통역 지원이 필요한지 선택해주세요.
+        </div>
         <div style={{display:'flex', gap:8}}>
           {[
             {v:'O', label:'필요 (Yes)', icon:<Check size={14}/>},
@@ -2239,32 +2246,50 @@ function SurveyTab({me, update}){
         </div>
       </QBox>
 
-      <QBox num={2} icon={<MessageSquare size={14}/>} title="피칭 쇼케이스 모더레이터 소개 멘트 (영어)">
+      <QBox num={2} icon={<FileText size={14}/>} title="피칭덱 번역 지원 필요 여부">
+        <div style={{fontSize:12, color:'var(--muted)', marginBottom:10, lineHeight:1.6}}>
+          피칭 쇼케이스 및 비즈니스 미팅에서 사용할 피칭덱(Pitch Deck)의 한→영 번역 지원이 필요한지 선택해주세요.
+        </div>
+        <div style={{display:'flex', gap:8}}>
+          {[
+            {v:'O', label:'필요 (Yes)', icon:<Check size={14}/>},
+            {v:'X', label:'불필요 (No)', icon:<X size={14}/>},
+          ].map(opt => (
+            <button key={opt.v} onClick={()=>setForm({...form, needsPitchDeckTranslation: opt.v})}
+              className={form.needsPitchDeckTranslation===opt.v ? 'btn btn-primary' : 'btn btn-ghost'}
+              style={{flex:1, justifyContent:'center', padding:'11px 24px'}}>
+              {opt.icon}{opt.label}
+            </button>
+          ))}
+        </div>
+      </QBox>
+
+      <QBox num={3} icon={<MessageSquare size={14}/>} title="피칭 쇼케이스 모더레이터 소개 멘트 (영어)">
         <textarea className="textarea" rows={5} value={form.moderatorIntroEn||''}
                   onChange={e=>setForm({...form, moderatorIntroEn:e.target.value})}
                   placeholder="Write the English introduction script the moderator will read on stage. e.g., 'Next up, we welcome Climax Studio, a Seoul-based animation studio with a portfolio of award-winning kids IPs...'"
                   style={{lineHeight:1.7}}/>
       </QBox>
 
-      <QBox num={3} icon={<Home size={14}/>} title="MIFA 출장 기간 숙소명 및 주소">
+      <QBox num={4} icon={<Home size={14}/>} title="MIFA 출장 기간 숙소명 및 주소">
         <textarea className="textarea" rows={3} value={form.accommodation||''}
                   onChange={e=>setForm({...form, accommodation:e.target.value})}
                   placeholder="호텔명, 주소, 체크인 / 체크아웃 일자를 기입해주세요. 예) Hôtel Mercure Annecy Centre · 26 Av. du Parmelan · Check-in 2026-06-10 / Check-out 2026-06-15"/>
       </QBox>
 
-      <QBox num={4} icon={<Plane size={14}/>} title="MIFA 출장 항공 정보">
+      <QBox num={5} icon={<Plane size={14}/>} title="MIFA 출장 항공 정보">
         <textarea className="textarea" rows={3} value={form.flightInfo||''}
                   onChange={e=>setForm({...form, flightInfo:e.target.value})}
                   placeholder="출국·입국 편명과 일시. 예) 출국 KE901 2026-06-09 13:45 ICN → CDG / 입국 KE902 2026-06-16 19:20 CDG → ICN"/>
       </QBox>
 
-      <QBox num={5} icon={<Mail size={14}/>} title="출장자료 우편 수령처 주소">
+      <QBox num={6} icon={<Mail size={14}/>} title="출장자료 우편 수령처 주소">
         <textarea className="textarea" rows={2} value={form.mailAddress||''}
                   onChange={e=>setForm({...form, mailAddress:e.target.value})}
                   placeholder="출장 전 자료를 발송할 국내 주소입니다. 회사 주소 또는 담당자 수령 가능 주소 (우편번호 포함)"/>
       </QBox>
 
-      <QBox num={6} icon={<Users size={14}/>} title="피칭 담당자 외 출장 인원">
+      <QBox num={7} icon={<Users size={14}/>} title="피칭 담당자 외 출장 인원">
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
           <div style={{fontSize:12, color:'var(--muted)'}}>{travelers.length}명 등록됨</div>
           <button className="btn btn-ghost" style={{padding:'6px 12px', fontSize:12}} onClick={addTraveler}><Plus size={12}/>인원 추가</button>
@@ -3034,7 +3059,7 @@ function AdminConsole({ state, update, viewerMode, onLogout }) {
     {k:'exhibitors',l:'참가사 관리',   i:<Briefcase size={15}/>, badge:fstate.exhibitors.length, koccaAllowed:true},
     {k:'rsvp',      l:'RSVP',        i:<ClipboardCheck size={15}/>, badge: fstate.buyers.filter(b=>b.invitationStatus==='accepted').length, koccaAllowed:true},
     {k:'schedule',  l:'비즈니스 상담 스케줄', i:<Calendar size={15}/>, badge:fstate.meetings.length, koccaAllowed:true},
-    {k:'matrix',    l:'바이어 매칭 매트릭스', i:<Target size={15}/>, koccaAllowed:true},
+    {k:'matrix',    l:'바이어 매칭 매트릭스', i:<Target size={15}/>, koccaAllowed:false},
   ];
   const TABS = isKoccaViewer ? ALL_TABS.filter(t => t.koccaAllowed) : ALL_TABS;
 
@@ -3065,7 +3090,7 @@ function AdminConsole({ state, update, viewerMode, onLogout }) {
           <Eye size={14} style={{color:'var(--purple-dk)'}}/>
           <span>
             <strong style={{color:'var(--purple-dk)'}}>KOCCA 뷰어 모드</strong>
-            {' · '}참가사 정보, 비즈니스 상담 스케줄, RSVP 응답, 매칭 매트릭스를 <strong>열람 전용</strong>으로 접근하고 있습니다. 편집 · 추가 · 삭제 · 다운로드 기능은 제한됩니다.
+            {' · '}참가사 정보, RSVP 응답, 비즈니스 상담 스케줄을 <strong>열람 전용</strong>으로 접근하고 있습니다. 편집 · 추가 · 삭제 · 다운로드 기능은 제한됩니다.
           </span>
         </div>
       )}
@@ -3634,49 +3659,56 @@ function BuyersTab({state, fullState, update, project, readOnly}){
       <SectionHeader eyebrow="DATABASE / BUYERS" title="바이어 DB 관리"
         desc="엑셀 파일을 업로드하면 헤더를 자동 매핑하여 DB가 일괄 갱신됩니다. 동일 ID는 병합(update), 신규 ID는 추가(insert)됩니다."/>
 
-      <div className="grid" style={{gridTemplateColumns:'1.2fr 1fr', gap:16, marginTop:24}}>
-        <div className="card" style={{padding:24, display:'flex', alignItems:'center', gap:24}}>
-          <div style={{width:56, height:56, background:'var(--navy)', color:'var(--gold)', display:'grid', placeItems:'center', flexShrink:0}}>
-            <FileSpreadsheet size={24}/>
-          </div>
-          <div style={{flex:1}}>
-            <div className="serif" style={{fontSize:18, fontWeight:500}}>Excel 일괄 업로드</div>
-            <div style={{fontSize:12.5, color:'var(--muted)', marginTop:4, lineHeight:1.5}}>
-              지원 컬럼: 회사명·담당자·이메일·국가·업종·취급품목·규모·관심품목·초청상태
+      <div className="grid bulk-upload-grid" style={{gridTemplateColumns:'1.2fr 1fr', gap:16, marginTop:24}}>
+        <div className="card bulk-upload-card" style={{padding:20}}>
+          <div className="bulk-upload-row" style={{display:'flex', alignItems:'center', gap:16}}>
+            <div className="bulk-upload-icon" style={{width:48, height:48, background:'var(--navy)', color:'var(--gold)', display:'grid', placeItems:'center', flexShrink:0, borderRadius:6}}>
+              <FileSpreadsheet size={20}/>
+            </div>
+            <div style={{flex:1, minWidth:0}}>
+              <div className="serif" style={{fontSize:16, fontWeight:500}}>Excel 일괄 업로드</div>
+              <div style={{fontSize:11.5, color:'var(--muted)', marginTop:3, lineHeight:1.5}}>
+                회사명·담당자·이메일·국가·업종·관심품목 등
+              </div>
             </div>
           </div>
-          <div style={{display:'flex', gap:8}}>
-            <button className="btn btn-ghost" onClick={downloadTemplate}><Upload size={14} style={{transform:'rotate(180deg)'}}/>템플릿</button>
-            <button className="btn btn-gold" onClick={()=>fileRef.current?.click()}><Upload size={14}/>업로드</button>
+          <div className="bulk-upload-actions" style={{display:'flex', gap:8, marginTop:14}}>
+            <button className="btn btn-ghost" style={{flex:1, justifyContent:'center'}} onClick={downloadTemplate}>
+              <Upload size={13} style={{transform:'rotate(180deg)'}}/>템플릿
+            </button>
+            <button className="btn btn-gold" style={{flex:1, justifyContent:'center'}} onClick={()=>fileRef.current?.click()}>
+              <Upload size={13}/>업로드
+            </button>
             <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{display:'none'}} onChange={handleUpload}/>
           </div>
         </div>
 
-        <div className="card" style={{padding:24}}>
+        <div className="card bulk-upload-card" style={{padding:20}}>
           {uploadReport ? (
             uploadReport.ok ? (
               <div>
                 <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:8}}>
-                  <Check size={16} style={{color:'var(--green)'}}/>
-                  <span className="serif" style={{fontSize:16, fontWeight:500}}>업로드 완료</span>
+                  <Check size={15} style={{color:'var(--green)'}}/>
+                  <span className="serif" style={{fontSize:15, fontWeight:500}}>업로드 완료</span>
                 </div>
-                <div style={{fontSize:12.5, color:'var(--muted)', lineHeight:1.7}}>
-                  파일 · <span className="mono">{uploadReport.file}</span><br/>
+                <div style={{fontSize:12, color:'var(--muted)', lineHeight:1.6}}>
+                  파일 · <span className="mono" style={{wordBreak:'break-all'}}>{uploadReport.file}</span><br/>
                   처리 · 총 {uploadReport.total}건 (신규 {uploadReport.added} · 갱신 {uploadReport.updated})
                 </div>
               </div>
             ) : (
               <div>
                 <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:8}}>
-                  <AlertCircle size={16} style={{color:'var(--red)'}}/>
-                  <span className="serif" style={{fontSize:16, fontWeight:500}}>업로드 실패</span>
+                  <AlertCircle size={15} style={{color:'var(--red)'}}/>
+                  <span className="serif" style={{fontSize:15, fontWeight:500}}>업로드 실패</span>
                 </div>
-                <div style={{fontSize:12.5, color:'var(--muted)'}}>{uploadReport.message}</div>
+                <div style={{fontSize:12, color:'var(--muted)'}}>{uploadReport.message}</div>
               </div>
             )
           ) : (
-            <div style={{color:'var(--muted)', fontSize:12.5, lineHeight:1.7}}>
-              <Eye size={14} style={{marginBottom:-2}}/> 업로드 결과가 여기에 표시됩니다. 헤더명이 다를 경우 자동 매핑되며, 매핑되지 않은 컬럼은 원본 그대로 보존됩니다.
+            <div style={{color:'var(--muted)', fontSize:12, lineHeight:1.6, display:'flex', alignItems:'flex-start', gap:6}}>
+              <Eye size={13} style={{marginTop:2, flexShrink:0}}/>
+              <span>업로드 결과가 여기에 표시됩니다. 헤더명은 자동 매핑됩니다.</span>
             </div>
           )}
         </div>
@@ -6098,7 +6130,8 @@ function SurveyDetail({survey}){
   const [showRRN, setShowRRN] = useState(false);
 
   const items = [
-    {label:'통역 필요 여부', value: s.needsInterpreter ? (s.needsInterpreter==='O' ? '필요 (Yes)' : '불필요 (No)') : null},
+    {label:'MIFA 현장 통역 필요 여부', value: s.needsInterpreter ? (s.needsInterpreter==='O' ? '필요 (Yes)' : '불필요 (No)') : null},
+    {label:'피칭덱 번역 지원 필요 여부', value: s.needsPitchDeckTranslation ? (s.needsPitchDeckTranslation==='O' ? '필요 (Yes)' : '불필요 (No)') : null},
     {label:'모더레이터 소개 멘트 (영문)', value: s.moderatorIntroEn, multi:true},
     {label:'숙소 정보', value: s.accommodation, multi:true},
     {label:'항공 정보', value: s.flightInfo, multi:true},
