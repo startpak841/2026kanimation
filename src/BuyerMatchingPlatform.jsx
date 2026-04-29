@@ -1310,16 +1310,26 @@ function saveAuthToStorage(auth) {
 
 export default function BuyerMatchingPlatform() {
   const [state, setState] = useState(null);
-  const [auth, setAuthRaw] = useState(() => loadAuthFromStorage()); // {role:'exhibitor'|'admin', userId?}
+  const [auth, setAuth] = useState(() => loadAuthFromStorage()); // {role:'exhibitor'|'admin', userId?}
   const [syncIndicator, setSyncIndicator] = useState(null); // 동기화 피드백 UI
 
-  // setAuth 래퍼: sessionStorage에도 자동 저장
-  const setAuth = (newAuth) => {
-    setAuthRaw(newAuth);
-    saveAuthToStorage(newAuth);
-  };
-
   useEffect(() => { loadState().then(setState); }, []);
+
+  // auth 변경 시 sessionStorage에도 자동 저장 (새로고침 시 복원용)
+  useEffect(() => {
+    saveAuthToStorage(auth);
+  }, [auth]);
+
+  // 복원된 참가사 userId가 현재 DB에 없으면 자동 로그아웃 (참가사 삭제된 경우 등)
+  useEffect(() => {
+    if (!state) return;
+    if (auth?.role === 'exhibitor' && state?.exhibitors) {
+      const exists = state.exhibitors.some(e => e.id === auth.userId);
+      if (!exists) {
+        setAuth(null);
+      }
+    }
+  }, [auth, state]);
 
   // 실시간 동기화 — 다른 탭에서 저장이 발생하면 자동 감지
   useEffect(() => {
@@ -1389,16 +1399,6 @@ export default function BuyerMatchingPlatform() {
       </div>
     );
   }
-
-  // 복원된 참가사 userId가 현재 DB에 없으면 자동 로그아웃 (참가사 삭제된 경우 등)
-  useEffect(() => {
-    if (auth?.role === 'exhibitor' && state?.exhibitors) {
-      const exists = state.exhibitors.some(e => e.id === auth.userId);
-      if (!exists) {
-        setAuth(null);
-      }
-    }
-  }, [auth, state?.exhibitors]);
 
   return (
     <div className="mice-root">
@@ -6639,6 +6639,7 @@ function RsvpTab({state, fullState, update, project, readOnly}){
   const [syncError, setSyncError] = useState({}); // { MIFA: '...', MIPCOM: '...' }
   const [detailBuyer, setDetailBuyer] = useState(null); // 상세 모달
   const [confirmData, setConfirmData] = useState(null); // 삭제 확인 모달
+  const [sourceFilter, setSourceFilter] = useState('ALL'); // 출처별 필터: ALL | csv | meeting | manual | exhibitor | other
 
   const deleteBuyer = (buyer) => {
     const meetingCount = fullState.meetings.filter(m => m.buyerId === buyer.id).length;
@@ -6657,7 +6658,10 @@ function RsvpTab({state, fullState, update, project, readOnly}){
       },
     });
   };
-  const fileRefs = { MIFA: useRef(null), MIPCOM: useRef(null), CANADA: useRef(null) };
+  const fileRefMIFA = useRef(null);
+  const fileRefMIPCOM = useRef(null);
+  const fileRefCANADA = useRef(null);
+  const fileRefs = { MIFA: fileRefMIFA, MIPCOM: fileRefMIPCOM, CANADA: fileRefCANADA };
 
   // CSV 파서
   const parseCsv = (text) => {
@@ -7078,7 +7082,7 @@ function RsvpTab({state, fullState, update, project, readOnly}){
   };
 
   // 출처별 필터 (ALL = 전체, csv = CSV 업로드, meeting = 미팅 등록, manual = RSVP 수동, exhibitor = 참가사 등록, other = 기타)
-  const [sourceFilter, setSourceFilter] = useState('ALL');
+  // sourceFilter useState는 함수 상단에서 선언됨
 
   // 행사별 필터 1차 적용 — 카운트 계산용
   const buyersByProject = fullState.buyers
