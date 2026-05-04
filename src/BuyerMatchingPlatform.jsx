@@ -3280,7 +3280,7 @@ function AdminConsole({ state, update, viewerMode, onLogout }) {
       <main style={{maxWidth:1360, margin:'0 auto', padding:'40px'}}>
         {tab === 'overview'   && <OverviewTab state={fstate} project={project}/>}
         {tab === 'buyers'     && <BuyersTab state={fstate} fullState={state} update={update} project={project} readOnly={readOnly}/>}
-        {tab === 'exhibitors' && <ExhibitorsTab state={fstate} readOnly={readOnly}/>}
+        {tab === 'exhibitors' && <ExhibitorsTab state={fstate} update={update} readOnly={readOnly}/>}
         {tab === 'rsvp'       && <RsvpTab state={fstate} fullState={state} update={update} project={project} readOnly={readOnly}/>}
         {tab === 'schedule'   && <AdminScheduleTab state={fstate} fullState={state} update={update} project={project} readOnly={readOnly}/>}
         {tab === 'matrix'     && <MatchMatrixTab state={fstate} fullState={state} project={project}/>}
@@ -4256,11 +4256,13 @@ function Modal({title, children, onClose}){
 }
 
 // ---------------- EXHIBITORS MANAGEMENT ----------------
-function ExhibitorsTab({state, readOnly}){
+function ExhibitorsTab({state, update, readOnly}){
   const [detailId, setDetailId] = useState(null);
+  const [editId, setEditId] = useState(null);
   const [search, setSearch] = useState('');
   const [projectFilter, setProjectFilter] = useState('ALL'); // ALL/MIFA/MIPCOM/CANADA
   const detail = detailId ? state.exhibitors.find(e => e.id === detailId) : null;
+  const editTarget = editId ? state.exhibitors.find(e => e.id === editId) : null;
 
   // 각 섹션 완성도 판정
   const sectionStatus = (e) => {
@@ -4427,7 +4429,22 @@ function ExhibitorsTab({state, readOnly}){
         </div>
       </div>
 
-      {detail && <ExhibitorDetailModal exhibitor={detail} onClose={()=>setDetailId(null)} readOnly={readOnly}/>}
+      {detail && (
+        <ExhibitorDetailModal
+          exhibitor={detail}
+          onClose={()=>setDetailId(null)}
+          onEdit={readOnly ? null : () => { setEditId(detail.id); setDetailId(null); }}
+          readOnly={readOnly}
+        />
+      )}
+      {editTarget && update && (
+        <ExhibitorEditModal
+          exhibitor={editTarget}
+          state={state}
+          update={update}
+          onClose={()=>setEditId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -4802,7 +4819,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
         buyerId,
         date: modalData.date,
         time: modalData.time,
-        table: modalData.table || `A-${String(s.meetings.length + 1).padStart(2,'0')}`,
+        table: modalData.table || '',
         status: modalData.status,
         notes: modalData.notes || '',
       };
@@ -5205,12 +5222,6 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
               </div>
             </div>
 
-            <div>
-              <label className="label">테이블</label>
-              <input className="input" value={modalData.table}
-                     onChange={e=>setModalData({...modalData, table:e.target.value})}
-                     placeholder="자동 배정 시 비워두세요"/>
-            </div>
             <div>
               <label className="label">상태</label>
               <select className="select" value={modalData.status} onChange={e=>setModalData({...modalData, status:e.target.value})}>
@@ -5908,7 +5919,7 @@ function IPImageUploader({form, setForm}){
 // ADMIN — EXHIBITOR DETAIL MODAL
 // ============================================================================
 
-function ExhibitorDetailModal({exhibitor, onClose, readOnly}){
+function ExhibitorDetailModal({exhibitor, onClose, onEdit, readOnly}){
   const e = exhibitor;
   const [logo, setLogo] = useState(null);
   const [downloading, setDownloading] = useState(false);
@@ -6048,6 +6059,11 @@ function ExhibitorDetailModal({exhibitor, onClose, readOnly}){
                 )}
               </button>
               )}
+              {onEdit && !readOnly && (
+                <button className="btn btn-primary" onClick={onEdit} style={{padding:'8px 14px', fontSize:12.5}}>
+                  <Edit3 size={13}/>회사정보 수정
+                </button>
+              )}
               <button className="btn btn-ghost" onClick={onClose} style={{padding:8}}><X size={16}/></button>
             </div>
           </div>
@@ -6122,6 +6138,203 @@ function ExhibitorDetailModal({exhibitor, onClose, readOnly}){
           <DetailSection title="수요조사" eyebrow="SECTION 04">
             <SurveyDetail survey={e.survey}/>
           </DetailSection>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// ADMIN — EXHIBITOR EDIT MODAL (관리자가 참가사 회사정보 수정)
+// ============================================================================
+
+function ExhibitorEditModal({exhibitor, state, update, onClose}){
+  const [form, setForm] = useState({
+    companyName: exhibitor.companyName || '',
+    companyNameEn: exhibitor.companyNameEn || '',
+    contactName: exhibitor.contactName || '',
+    position: exhibitor.position || '',
+    email: exhibitor.email || '',
+    phone: exhibitor.phone || '',
+    website: exhibitor.website || '',
+    address: exhibitor.address || '',
+    project: exhibitor.project || 'MIFA',
+    loginId: exhibitor.loginId || '',
+    password: exhibitor.password || '',
+  });
+
+  const [showPw, setShowPw] = useState(false);
+  const stop = (ev) => ev.stopPropagation();
+
+  const save = () => {
+    if (!form.companyName.trim()) { alert('회사명은 필수 입력입니다.'); return; }
+    if (!form.loginId.trim()) { alert('로그인 ID는 필수 입력입니다.'); return; }
+    if (!form.password.trim()) { alert('비밀번호는 필수 입력입니다.'); return; }
+    // 다른 참가사와 loginId 중복 체크
+    const dup = state.exhibitors.some(e => e.id !== exhibitor.id && e.loginId === form.loginId.trim());
+    if (dup) { alert('이미 사용 중인 로그인 ID입니다. 다른 ID를 사용하세요.'); return; }
+
+    update(s => ({
+      ...s,
+      exhibitors: s.exhibitors.map(e => e.id === exhibitor.id ? {
+        ...e,
+        ...form,
+        companyName: form.companyName.trim(),
+        loginId: form.loginId.trim(),
+        password: form.password.trim(),
+        updatedAt: new Date().toISOString(),
+        sectionUpdates: { ...(e.sectionUpdates || {}), profile: new Date().toISOString() },
+      } : e),
+    }));
+    onClose();
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="mice-modal" onClick={stop} style={{maxWidth:760, width:'90%', maxHeight:'90vh', overflowY:'auto'}}>
+        <div style={{padding:'24px 28px 20px', borderBottom:'1px solid var(--line)', display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:14}}>
+          <div>
+            <div className="mono" style={{fontSize:10, letterSpacing:'0.18em', color:'var(--muted)', marginBottom:6, fontWeight:700}}>
+              ADMIN · EDIT EXHIBITOR
+            </div>
+            <h2 className="serif" style={{fontSize:22, fontWeight:600, margin:0, color:'var(--ink)'}}>
+              참가사 정보 수정
+            </h2>
+            <div style={{fontSize:11.5, color:'var(--muted)', marginTop:6, lineHeight:1.5}}>
+              관리자 권한으로 참가사 회사정보·계정정보를 직접 수정합니다. 변경 내용은 저장 즉시 반영되며, 참가사 본인 페이지에도 동기화됩니다.
+            </div>
+          </div>
+          <button className="btn btn-ghost" onClick={onClose} style={{padding:8, flexShrink:0}}><X size={16}/></button>
+        </div>
+
+        <div style={{padding:'20px 28px 24px'}}>
+          {/* 행사 / 프로젝트 */}
+          <div style={{marginBottom:18}}>
+            <label className="label">행사 / 프로젝트</label>
+            <div style={{display:'flex', gap:8}}>
+              {['MIFA','MIPCOM','CANADA'].map(p => {
+                const selected = form.project === p;
+                const colors = {'MIFA':'#7C3AED', 'MIPCOM':'#06B6D4', 'CANADA':'#DB2777'};
+                return (
+                  <button key={p} type="button"
+                    onClick={()=>setForm({...form, project:p})}
+                    style={{
+                      flex:1, padding:'10px 14px', borderRadius:'var(--radius-sm)', cursor:'pointer',
+                      border: selected ? `1px solid ${colors[p]}` : '1px solid var(--line)',
+                      background: selected ? colors[p] : 'var(--paper)',
+                      color: selected ? '#fff' : 'var(--ink-2)',
+                      fontSize:13, fontWeight:600, fontFamily:'inherit',
+                      transition:'all .15s',
+                    }}>
+                    {p}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 회사정보 섹션 */}
+          <div className="mono" style={{fontSize:10, letterSpacing:'0.18em', color:'var(--muted)', marginBottom:10, fontWeight:700}}>
+            COMPANY INFO
+          </div>
+          <div className="grid" style={{gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:18}}>
+            <div style={{gridColumn:'1 / -1'}}>
+              <label className="label">회사명 (한글) <span style={{color:'var(--red)'}}>*</span></label>
+              <input className="input" value={form.companyName}
+                     onChange={e=>setForm({...form, companyName:e.target.value})}
+                     placeholder="예) 클라이맥스 스튜디오"/>
+            </div>
+            <div style={{gridColumn:'1 / -1'}}>
+              <label className="label">회사명 (영문)</label>
+              <input className="input" value={form.companyNameEn}
+                     onChange={e=>setForm({...form, companyNameEn:e.target.value})}
+                     placeholder="e.g., Climax Studio"/>
+            </div>
+            <div>
+              <label className="label">담당자 이름</label>
+              <input className="input" value={form.contactName}
+                     onChange={e=>setForm({...form, contactName:e.target.value})}
+                     placeholder="홍길동"/>
+            </div>
+            <div>
+              <label className="label">직급</label>
+              <input className="input" value={form.position}
+                     onChange={e=>setForm({...form, position:e.target.value})}
+                     placeholder="대표 / 팀장 / Producer 등"/>
+            </div>
+            <div>
+              <label className="label">이메일</label>
+              <input className="input" value={form.email} type="email"
+                     onChange={e=>setForm({...form, email:e.target.value})}
+                     placeholder="contact@company.com"/>
+            </div>
+            <div>
+              <label className="label">연락처</label>
+              <input className="input" value={form.phone}
+                     onChange={e=>setForm({...form, phone:e.target.value})}
+                     placeholder="+82-2-0000-0000"/>
+            </div>
+            <div style={{gridColumn:'1 / -1'}}>
+              <label className="label">웹사이트</label>
+              <input className="input" value={form.website}
+                     onChange={e=>setForm({...form, website:e.target.value})}
+                     placeholder="https://company.com"/>
+            </div>
+            <div style={{gridColumn:'1 / -1'}}>
+              <label className="label">주소</label>
+              <input className="input" value={form.address}
+                     onChange={e=>setForm({...form, address:e.target.value})}
+                     placeholder="서울특별시 ..."/>
+            </div>
+          </div>
+
+          {/* 계정 정보 섹션 */}
+          <div className="mono" style={{fontSize:10, letterSpacing:'0.18em', color:'var(--muted)', marginBottom:10, fontWeight:700, marginTop:8}}>
+            LOGIN CREDENTIALS
+          </div>
+          <div style={{padding:'10px 14px', background:'var(--ivory-2)', fontSize:11, color:'var(--muted)', marginBottom:12, lineHeight:1.6, borderRadius:'var(--radius-sm)', border:'1px solid var(--line)'}}>
+            <AlertCircle size={12} style={{verticalAlign:'middle', marginRight:5, marginBottom:1}}/>
+            로그인 ID·비밀번호 변경 시 참가사에게 별도로 안내해주세요. 다른 참가사와 중복된 ID는 사용할 수 없습니다.
+          </div>
+          <div className="grid" style={{gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:18}}>
+            <div>
+              <label className="label">로그인 ID <span style={{color:'var(--red)'}}>*</span></label>
+              <input className="input" value={form.loginId}
+                     onChange={e=>setForm({...form, loginId:e.target.value})}
+                     autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                     placeholder="climax"/>
+            </div>
+            <div>
+              <label className="label">비밀번호 <span style={{color:'var(--red)'}}>*</span></label>
+              <div style={{position:'relative'}}>
+                <input className="input" value={form.password}
+                       type={showPw ? 'text' : 'password'}
+                       onChange={e=>setForm({...form, password:e.target.value})}
+                       autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                       style={{paddingRight:38}}/>
+                <button type="button" onClick={()=>setShowPw(v=>!v)}
+                        style={{position:'absolute', right:6, top:'50%', transform:'translateY(-50%)',
+                                background:'transparent', border:'none', padding:6, cursor:'pointer',
+                                color:'var(--muted)', display:'inline-flex'}}
+                        title={showPw ? '숨기기' : '보이기'}>
+                  <Eye size={14}/>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* 액션 버튼 */}
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:24, paddingTop:16, borderTop:'1px solid var(--line)', gap:12}}>
+            <div style={{fontSize:11, color:'var(--muted-2)', lineHeight:1.5}}>
+              IP 정보, 회사 소개, 수요조사는 참가사 본인 페이지에서 수정합니다.
+            </div>
+            <div style={{display:'flex', gap:8}}>
+              <button className="btn btn-ghost" onClick={onClose}>취소</button>
+              <button className="btn btn-primary" onClick={save}>
+                <Save size={14}/>저장
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -6587,7 +6800,6 @@ function BuyerDetailModal({buyer, fullState, onClose, onEdit}){
                 <div key={m.id} style={{padding:'10px 14px', background:'var(--paper)', border:'1px solid var(--line)', borderRadius:'var(--radius-sm)', display:'flex', alignItems:'center', gap:12, fontSize:12.5}}>
                   <span className="mono tabular" style={{fontWeight:600, color:'var(--ink-2)'}}>{m.date} {m.time}</span>
                   <span style={{flex:1, fontWeight:500}}>{ex?.companyName || '—'}</span>
-                  {m.table && <span className="mono" style={{fontSize:10.5, padding:'2px 7px', background:'var(--ivory-2)', borderRadius:3, color:'var(--muted)'}}>{m.table}</span>}
                 </div>
               );
             })}
@@ -6975,7 +7187,7 @@ function RsvpTab({state, fullState, update, project, readOnly}){
                 buyerId,
                 date,
                 time: slot,
-                table: `A-${String(meetings.length + 1).padStart(2,'0')}`,
+                table: '',
                 status: 'confirmed',
                 notes: exhibitorNames.length > 1
                   ? `구글폼 응답 기반 자동 편성 (다중 기업 ${exhibitorNames.length}개 중 ${exhName})`
