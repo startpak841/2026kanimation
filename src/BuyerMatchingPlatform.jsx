@@ -191,18 +191,18 @@ function formatBytes(n) {
 
 const MAX_IMG_BYTES = 50 * 1024 * 1024; // 50MB per file (Supabase Storage 버킷 한도와 일치)
 
-// IP 포맷 세부 정보 요약 (chip으로 표시)
+// IP 포맷 세부 정보 요약 (chip으로 표시) — 영문 표기
 function formatRuntimeSummary(ip){
   if (!ip) return [];
   const out = [];
-  if (ip.episodes)   out.push(`에피소드 ${ip.episodes}개`);
-  if (ip.seasons)    out.push(`시즌 ${ip.seasons}기`);
+  if (ip.episodes)   out.push(`${ip.episodes} ${ip.episodes === 1 ? 'Episode' : 'Episodes'}`);
+  if (ip.seasons)    out.push(`${ip.seasons} ${ip.seasons === 1 ? 'Season' : 'Seasons'}`);
   const m = parseInt(ip.runtimeMin||0, 10);
   const s = parseInt(ip.runtimeSec||0, 10);
   if (m || s) {
-    if (m && s)      out.push(`회당 ${m}분 ${s}초`);
-    else if (m)      out.push(`회당 ${m}분`);
-    else             out.push(`회당 ${s}초`);
+    if (m && s)      out.push(`${m} min ${s} sec / ep`);
+    else if (m)      out.push(`${m} min / ep`);
+    else             out.push(`${s} sec / ep`);
   }
   return out;
 }
@@ -315,14 +315,104 @@ function getBuyerRegion(country) {
   return null;
 }
 
-const GENRE_OPTIONS    = ['액션/어드벤처','코미디','드라마','교육/에듀테인먼트','판타지','SF','일상/슬라이스 오브 라이프','뮤지컬','스포츠','호러/스릴러','기타'];
-const TARGET_AGE_OPTIONS = ['유아 (0-4)','키즈 (5-8)','패밀리 (All-Ages)','틴 (9-14)','YA (15-18)','성인 (18+)'];
-const FORMAT_OPTIONS   = ['TV 시리즈','장편 극장판','단편','디지털 / 숏폼','IP 라이선싱','기획 개발 단계','기타'];
+// IP 옵션 — 글로벌 바이어 노출용 영문 표기
+const GENRE_OPTIONS = [
+  'Action / Adventure',
+  'Comedy',
+  'Drama',
+  'Edutainment / Education',
+  'Fantasy',
+  'Sci-Fi',
+  'Slice of Life',
+  'Musical',
+  'Sports',
+  'Horror / Thriller',
+  'Others',
+];
+const TARGET_AGE_OPTIONS = [
+  'Preschool (0-4)',
+  'Kids (5-8)',
+  'Family (All-Ages)',
+  'Tween (9-14)',
+  'Young Adult (15-18)',
+  'Adult (18+)',
+];
+const FORMAT_OPTIONS = [
+  'TV Series',
+  'Theatrical Feature',
+  'Short Film',
+  'Digital / Short Form',
+  'IP Licensing',
+  'In Development',
+  'Others',
+];
 
-// 바이어 관심 필드 정규화 (배열/단일/누락 대비)
-const getBuyerGenres    = (b) => Array.isArray(b?.interestedGenres)    ? b.interestedGenres    : (b?.interestedGenres    ? [b.interestedGenres]    : []);
-const getBuyerFormats   = (b) => Array.isArray(b?.interestedFormats)   ? b.interestedFormats   : (b?.interestedFormats   ? [b.interestedFormats]   : []);
-const getBuyerTargetAges= (b) => Array.isArray(b?.interestedTargetAges)? b.interestedTargetAges: (b?.interestedTargetAges? [b.interestedTargetAges]: []);
+// 한국어 → 영어 자동 마이그레이션 (기존 데이터 호환)
+const GENRE_KR_TO_EN = {
+  '액션/어드벤처':'Action / Adventure', '액션·어드벤처':'Action / Adventure',
+  '액션':'Action / Adventure', '어드벤처':'Action / Adventure',
+  '코미디':'Comedy',
+  '드라마':'Drama',
+  '교육/에듀테인먼트':'Edutainment / Education', '교육':'Edutainment / Education', '에듀테인먼트':'Edutainment / Education',
+  '판타지':'Fantasy',
+  'SF':'Sci-Fi', '사이언스 픽션':'Sci-Fi', '공상과학':'Sci-Fi',
+  '일상/슬라이스 오브 라이프':'Slice of Life', '일상':'Slice of Life',
+  '뮤지컬':'Musical',
+  '스포츠':'Sports',
+  '호러/스릴러':'Horror / Thriller', '호러':'Horror / Thriller', '스릴러':'Horror / Thriller',
+  '기타':'Others',
+};
+const TARGET_AGE_KR_TO_EN = {
+  '유아 (0-4)':'Preschool (0-4)', '유아':'Preschool (0-4)',
+  '키즈 (5-8)':'Kids (5-8)', '키즈':'Kids (5-8)',
+  '패밀리 (All-Ages)':'Family (All-Ages)', '패밀리':'Family (All-Ages)', '전 연령':'Family (All-Ages)',
+  '틴 (9-14)':'Tween (9-14)', '틴':'Tween (9-14)', '트윈':'Tween (9-14)',
+  'YA (15-18)':'Young Adult (15-18)', 'YA':'Young Adult (15-18)', '청소년':'Young Adult (15-18)',
+  '성인 (18+)':'Adult (18+)', '성인':'Adult (18+)',
+};
+const FORMAT_KR_TO_EN = {
+  'TV 시리즈':'TV Series', '시리즈':'TV Series',
+  '장편 극장판':'Theatrical Feature', '극장판':'Theatrical Feature', '장편':'Theatrical Feature',
+  '단편':'Short Film',
+  '디지털 / 숏폼':'Digital / Short Form', '숏폼':'Digital / Short Form', '디지털':'Digital / Short Form',
+  'IP 라이선싱':'IP Licensing', '라이선싱':'IP Licensing', '라이센싱':'IP Licensing',
+  '기획 개발 단계':'In Development', '기획':'In Development', '개발 단계':'In Development', '개발':'In Development',
+  '기타':'Others',
+};
+// 한국어/영문 둘 다 받아서 영어 표준값으로 변환 (이미 영어면 그대로)
+function migrateGenre(v){
+  if (!v) return v;
+  if (GENRE_OPTIONS.includes(v)) return v;
+  return GENRE_KR_TO_EN[v] || v;
+}
+function migrateTargetAge(v){
+  if (!v) return v;
+  if (TARGET_AGE_OPTIONS.includes(v)) return v;
+  return TARGET_AGE_KR_TO_EN[v] || v;
+}
+function migrateFormat(v){
+  if (!v) return v;
+  if (FORMAT_OPTIONS.includes(v)) return v;
+  return FORMAT_KR_TO_EN[v] || v;
+}
+function migrateList(arr, fn){
+  if (!Array.isArray(arr)) return arr;
+  return arr.map(fn);
+}
+
+// 바이어 관심 필드 정규화 (배열/단일/누락 대비 + 한국어→영어 자동 마이그레이션)
+const getBuyerGenres    = (b) => {
+  const raw = Array.isArray(b?.interestedGenres)    ? b.interestedGenres    : (b?.interestedGenres    ? [b.interestedGenres]    : []);
+  return raw.map(migrateGenre);
+};
+const getBuyerFormats   = (b) => {
+  const raw = Array.isArray(b?.interestedFormats)   ? b.interestedFormats   : (b?.interestedFormats   ? [b.interestedFormats]   : []);
+  return raw.map(migrateFormat);
+};
+const getBuyerTargetAges= (b) => {
+  const raw = Array.isArray(b?.interestedTargetAges)? b.interestedTargetAges: (b?.interestedTargetAges? [b.interestedTargetAges]: []);
+  return raw.map(migrateTargetAge);
+};
 // 바이어 관심 권역 — 명시값 우선, 없으면 국가 기반 자동 도출
 const getBuyerInterestedRegions = (b) => {
   if (Array.isArray(b?.interestedRegions) && b.interestedRegions.length > 0) {
@@ -353,21 +443,21 @@ const EVENT_CONFIG = {
       { date: '2026-06-26', dow: '금 · Fri' },
     ],
     timeStart: '09:00',
-    timeEnd:   '18:00',
+    timeEnd:   '19:00',
     slotMinutes: 30,
   },
   MIPCOM: {
     label: 'MIPCOM 2026',
     dates: [], // 날짜 미확정
     timeStart: '09:00',
-    timeEnd:   '18:00',
+    timeEnd:   '19:00',
     slotMinutes: 30,
   },
   CANADA: {
     label: 'Canada Event 2026',
     dates: [],
     timeStart: '09:00',
-    timeEnd:   '18:00',
+    timeEnd:   '19:00',
     slotMinutes: 30,
   },
 };
@@ -2003,6 +2093,10 @@ function IPsTab({me, update}){
   const openEdit = (ip) => {
     setForm({
       ...ip,
+      // 기존 한국어 값이 들어있으면 영어로 자동 변환 (옵션 변경 마이그레이션)
+      genre: migrateGenre(ip.genre),
+      targetAge: migrateTargetAge(ip.targetAge),
+      format: migrateFormat(ip.format),
       desiredBuyerPriority: ip.desiredBuyerPriority || ['','','',''],
       regions: ip.regions || [],
     });
@@ -2222,33 +2316,33 @@ function IPsTab({me, update}){
               </div>
             </div>
             <div>
-              <label className="label">장르 (Genre)</label>
+              <label className="label">Genre</label>
               <select className="select" value={form.genre||''} onChange={e=>setForm({...form, genre:e.target.value})}>
-                <option value="">선택하세요</option>
+                <option value="">Select genre</option>
                 {GENRE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
               </select>
             </div>
             <div>
-              <label className="label">타겟 연령 (Target Age)</label>
+              <label className="label">Target Age</label>
               <select className="select" value={form.targetAge||''} onChange={e=>setForm({...form, targetAge:e.target.value})}>
-                <option value="">선택하세요</option>
+                <option value="">Select target age</option>
                 {TARGET_AGE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
               </select>
             </div>
             <div style={{gridColumn:'1 / -1'}}>
-              <label className="label">포맷</label>
+              <label className="label">Format</label>
               <select className="select" value={form.format||''} onChange={e=>setForm({...form, format:e.target.value})}>
-                <option value="">선택하세요</option>
+                <option value="">Select format</option>
                 {FORMAT_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
               </select>
             </div>
             <div style={{gridColumn:'1 / -1'}}>
-              <label className="label">세부 사항 <span style={{color:'var(--muted)', fontWeight:400, marginLeft:6}}>(해당 항목만 기입)</span></label>
+              <label className="label">Details <span style={{color:'var(--muted)', fontWeight:400, marginLeft:6}}>(fill in applicable fields)</span></label>
               <div style={{display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:10}}>
-                <NumberWithHint value={form.episodes}   onChange={v=>setForm({...form, episodes:v})}   placeholder="0" hint="에피소드 수"  unit="개"/>
-                <NumberWithHint value={form.seasons}    onChange={v=>setForm({...form, seasons:v})}    placeholder="0" hint="시즌 수"     unit="기"/>
-                <NumberWithHint value={form.runtimeMin} onChange={v=>setForm({...form, runtimeMin:v})} placeholder="0" hint="회당 러닝타임" unit="분"/>
-                <NumberWithHint value={form.runtimeSec} onChange={v=>setForm({...form, runtimeSec:v})} placeholder="0" hint=""              unit="초" max={59}/>
+                <NumberWithHint value={form.episodes}   onChange={v=>setForm({...form, episodes:v})}   placeholder="0" hint="Episodes"      unit="ep"/>
+                <NumberWithHint value={form.seasons}    onChange={v=>setForm({...form, seasons:v})}    placeholder="0" hint="Seasons"       unit="sea"/>
+                <NumberWithHint value={form.runtimeMin} onChange={v=>setForm({...form, runtimeMin:v})} placeholder="0" hint="Runtime / ep"  unit="min"/>
+                <NumberWithHint value={form.runtimeSec} onChange={v=>setForm({...form, runtimeSec:v})} placeholder="0" hint=""              unit="sec" max={59}/>
               </div>
             </div>
           </div>
@@ -2427,9 +2521,13 @@ function SurveyTab({me, update}){
       </QBox>
 
       <QBox num={4} icon={<Home size={14}/>} title="MIFA 출장 기간 숙소명 및 주소">
+        <div style={{fontSize:12, color:'var(--muted)', marginBottom:10, lineHeight:1.6}}>
+          개별로 숙소를 예약하신 경우 호텔명·주소·체크인/체크아웃 일자를 기입해주세요.
+          <strong style={{color:'var(--ink-2)', fontWeight:600}}> 운영 사무국에서 숙소가 제공되는 경우 비워두셔도 됩니다.</strong>
+        </div>
         <textarea className="textarea" rows={3} value={form.accommodation||''}
                   onChange={e=>setForm({...form, accommodation:e.target.value})}
-                  placeholder="호텔명, 주소, 체크인 / 체크아웃 일자를 기입해주세요. 예) Hôtel Mercure Annecy Centre · 26 Av. du Parmelan · Check-in 2026-06-10 / Check-out 2026-06-15"/>
+                  placeholder="예) Hôtel Mercure Annecy Centre · 26 Av. du Parmelan · Check-in 2026-06-10 / Check-out 2026-06-15"/>
       </QBox>
 
       <QBox num={5} icon={<Plane size={14}/>} title="MIFA 출장 항공 정보">
@@ -7341,9 +7439,9 @@ function RsvpTab({state, fullState, update, project, readOnly}){
     if (candidates.length === 0) { alert('해당 프로젝트에 등록된 참가사가 없습니다.'); return; }
     const best = candidates[0];
     const date = (buyer.preferredDates && buyer.preferredDates[0]) || '2026-06-10';
-    const slots = ['09:30','10:00','10:30','11:00','11:30','13:30','14:00','14:30','15:00','15:30','16:00','16:30'];
+    const slots = ['09:30','10:00','10:30','11:00','11:30','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30'];
     const used = new Set(fullState.meetings.filter(m => m.date === date).map(m => m.time));
-    const time = slots.find(t => !used.has(t)) || '17:00';
+    const time = slots.find(t => !used.has(t)) || '18:30';
     const tableNum = String(fullState.meetings.length + 1).padStart(2, '0');
     const newMeeting = {
       id: `MT-${String(fullState.meetings.length + 1).padStart(3,'0')}`,
