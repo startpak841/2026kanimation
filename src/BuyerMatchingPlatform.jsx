@@ -93,7 +93,7 @@ async function saveState(state) {
 // 로드 시 모든 chunk를 순서대로 읽어 이어붙여 원본 복원
 
 // Supabase 백엔드로 전환 후 청크 분할은 사실상 불필요 — 큰 값으로 설정하여 청크 분할 회피
-const CHUNK_SIZE = 200 * 1024 * 1024; // 200MB — 50MB 한도보다 크게 설정해 청크 1개로 처리
+const CHUNK_SIZE = 250 * 1024 * 1024; // 250MB — 200MB 한도보다 크게 설정해 청크 1개로 처리
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -189,7 +189,7 @@ function formatBytes(n) {
   return (n/1024/1024).toFixed(1) + ' MB';
 }
 
-const MAX_IMG_BYTES = 50 * 1024 * 1024; // 50MB per file (Supabase Storage 버킷 한도와 일치)
+const MAX_IMG_BYTES = 200 * 1024 * 1024; // 200MB per file (Supabase Storage 버킷 한도와 일치)
 
 // IP 포맷 세부 정보 요약 (chip으로 표시) — 영문 표기
 function formatRuntimeSummary(ip){
@@ -2039,7 +2039,7 @@ function IntroTab({me, update}){
       <div className="card" style={{padding:28, marginTop:24}}>
         <div className="serif" style={{fontSize:17, fontWeight:600, marginBottom:16, display:'flex', alignItems:'center', gap:8}}>
           <Building2 size={16}/> 회사 로고
-          <span style={{fontSize:11.5, color:'var(--muted)', fontWeight:400, fontFamily:'inherit', letterSpacing:'normal'}}>PNG, JPG, SVG · 50MB 이하</span>
+          <span style={{fontSize:11.5, color:'var(--muted)', fontWeight:400, fontFamily:'inherit', letterSpacing:'normal'}}>PNG, JPG, SVG · 200MB 이하</span>
         </div>
         <LogoUploader me={me} update={update}/>
       </div>
@@ -2412,7 +2412,7 @@ function IPsTab({me, update}){
 
           <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:10}}>
             <div className="label" style={{margin:0}}>IP 이미지</div>
-            <div style={{fontSize:11, color:'var(--muted-2)'}}>복수 업로드 · PNG, JPG, WebP · 파일당 50MB 이하</div>
+            <div style={{fontSize:11, color:'var(--muted-2)'}}>복수 업로드 · PNG, JPG, WebP · 파일당 200MB 이하</div>
           </div>
           <IPImageUploader form={form} setForm={setForm}/>
 
@@ -5852,11 +5852,11 @@ function LogoUploader({me, update}){
         `이미지 용량이 한도를 초과했습니다.\n` +
         `\n` +
         `• 현재 파일: ${formatBytes(file.size)}\n` +
-        `• 허용 한도: 50MB\n` +
+        `• 허용 한도: 200MB\n` +
         `\n` +
         `해결 방법:\n` +
         `1. 이미지 압축 사이트 이용: tinypng.com, squoosh.app\n` +
-        `2. 이미지 크기 축소 (4000×4000px 이하 권장)\n` +
+        `2. 이미지 크기 축소 (권장 4000×4000px 이하)\n` +
         `3. JPG 형식으로 저장 (PNG보다 용량 작음)`
       );
       return;
@@ -5912,7 +5912,7 @@ function LogoUploader({me, update}){
         }}>
           <Upload size={22}/>
           <div style={{fontSize:13.5, color:'var(--ink)', fontWeight:500}}>클릭하여 로고 업로드</div>
-          <div style={{fontSize:11.5}}>PNG / JPG / SVG · 50MB 이하 · 정사각형 권장</div>
+          <div style={{fontSize:11.5}}>PNG / JPG / SVG · 200MB 이하 · 정사각형 권장</div>
           {busy && <div style={{fontSize:11}}>업로드 중…</div>}
         </button>
       )}
@@ -5952,7 +5952,7 @@ function IPImageUploader({form, setForm}){
       if (!file.type.startsWith('image/')) continue;
       if (file.size > MAX_IMG_BYTES) {
         alert(
-          `"${file.name}" 파일이 50MB를 초과합니다 (현재 ${formatBytes(file.size)}).\n` +
+          `"${file.name}" 파일이 200MB를 초과합니다 (현재 ${formatBytes(file.size)}).\n` +
           `\n` +
           `이 파일은 건너뛰고 나머지 파일만 업로드합니다.\n` +
           `\n` +
