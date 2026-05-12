@@ -5,7 +5,7 @@ import {
   Globe, Tag, TrendingUp, AlertCircle, FileSpreadsheet, Send, Filter,
   BarChart3, Clock, MapPin, Award, ArrowUpRight, Plus, Trash2, Eye,
   Film, FileText, ClipboardList, Languages, Plane, Home, MessageSquare, User2,
-  ClipboardCheck, Link2, Copy, ExternalLink, Lock
+  ClipboardCheck, Link2, Copy, ExternalLink, Lock, Layers
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -2437,7 +2437,7 @@ function IPsTab({me, update}){
 
 // ---------------- SURVEY TAB — 수요조사 ----------------
 function SurveyTab({me, update}){
-  const initial = me.survey || { needsInterpreter:null, moderatorIntroEn:'', accommodation:'', flightInfo:'', mailAddress:'', additionalTravelers:[], pitcherRRN:'', feedback:'' };
+  const initial = me.survey || { needsInterpreter:null, needsPitchDeckTranslation:null, needsCueCard:null, moderatorIntroEn:'', accommodation:'', flightInfo:'', mailAddress:'', additionalTravelers:[], pitcherRRN:'', feedback:'' };
   const [form, setForm] = useState(initial);
   const [saved, setSaved] = useState(false);
   useEffect(()=>setForm(me.survey || initial), [me.id]);
@@ -2513,14 +2513,33 @@ function SurveyTab({me, update}){
         </div>
       </QBox>
 
-      <QBox num={3} icon={<MessageSquare size={14}/>} title="피칭 쇼케이스 모더레이터 소개 멘트 (영어)">
+      <QBox num={3} icon={<Layers size={14}/>} title="큐카드 제작 희망 여부">
+        <div style={{fontSize:12, color:'var(--muted)', marginBottom:10, lineHeight:1.6}}>
+          큐카드는 IP 키비주얼을 활용한 피칭 스크립트 인쇄물입니다. 피칭 쇼케이스 무대에서 활용 가능합니다.
+          <strong style={{color:'var(--ink-2)', fontWeight:600}}> 제작 희망 시 행사 전 최종 스크립트 파일을 운영 사무국에 별도로 전달해주셔야 합니다.</strong>
+        </div>
+        <div style={{display:'flex', gap:8}}>
+          {[
+            {v:'O', label:'희망 (Yes)', icon:<Check size={14}/>},
+            {v:'X', label:'불희망 (No)', icon:<X size={14}/>},
+          ].map(opt => (
+            <button key={opt.v} onClick={()=>setForm({...form, needsCueCard: opt.v})}
+              className={form.needsCueCard===opt.v ? 'btn btn-primary' : 'btn btn-ghost'}
+              style={{flex:1, justifyContent:'center', padding:'11px 24px'}}>
+              {opt.icon}{opt.label}
+            </button>
+          ))}
+        </div>
+      </QBox>
+
+      <QBox num={4} icon={<MessageSquare size={14}/>} title="피칭 쇼케이스 모더레이터 소개 멘트 (영어)">
         <textarea className="textarea" rows={5} value={form.moderatorIntroEn||''}
                   onChange={e=>setForm({...form, moderatorIntroEn:e.target.value})}
                   placeholder="Write the English introduction script the moderator will read on stage. e.g., 'Next up, we welcome Climax Studio, a Seoul-based animation studio with a portfolio of award-winning kids IPs...'"
                   style={{lineHeight:1.7}}/>
       </QBox>
 
-      <QBox num={4} icon={<Home size={14}/>} title="MIFA 출장 기간 숙소명 및 주소">
+      <QBox num={5} icon={<Home size={14}/>} title="MIFA 출장 기간 숙소명 및 주소">
         <div style={{fontSize:12, color:'var(--muted)', marginBottom:10, lineHeight:1.6}}>
           개별로 숙소를 예약하신 경우 호텔명·주소·체크인/체크아웃 일자를 기입해주세요.
           <strong style={{color:'var(--ink-2)', fontWeight:600}}> 운영 사무국에서 숙소가 제공되는 경우 비워두셔도 됩니다.</strong>
@@ -2530,19 +2549,19 @@ function SurveyTab({me, update}){
                   placeholder="예) Hôtel Mercure Annecy Centre · 26 Av. du Parmelan · Check-in 2026-06-10 / Check-out 2026-06-15"/>
       </QBox>
 
-      <QBox num={5} icon={<Plane size={14}/>} title="MIFA 출장 항공 정보">
+      <QBox num={6} icon={<Plane size={14}/>} title="MIFA 출장 항공 정보">
         <textarea className="textarea" rows={3} value={form.flightInfo||''}
                   onChange={e=>setForm({...form, flightInfo:e.target.value})}
                   placeholder="출국·입국 편명과 일시. 예) 출국 KE901 2026-06-09 13:45 ICN → CDG / 입국 KE902 2026-06-16 19:20 CDG → ICN"/>
       </QBox>
 
-      <QBox num={6} icon={<Mail size={14}/>} title="출장자료 우편 수령처 주소">
+      <QBox num={7} icon={<Mail size={14}/>} title="출장자료 우편 수령처 주소">
         <textarea className="textarea" rows={2} value={form.mailAddress||''}
                   onChange={e=>setForm({...form, mailAddress:e.target.value})}
                   placeholder="출장 전 자료를 발송할 국내 주소입니다. 회사 주소 또는 담당자 수령 가능 주소 (우편번호 포함)"/>
       </QBox>
 
-      <QBox num={7} icon={<Users size={14}/>} title="피칭 담당자 외 출장 인원">
+      <QBox num={8} icon={<Users size={14}/>} title="피칭 담당자 외 출장 인원">
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
           <div style={{fontSize:12, color:'var(--muted)'}}>{travelers.length}명 등록됨</div>
           <button className="btn btn-ghost" style={{padding:'6px 12px', fontSize:12}} onClick={addTraveler}><Plus size={12}/>인원 추가</button>
@@ -2575,7 +2594,7 @@ function SurveyTab({me, update}){
             <Shield size={14}/>
           </div>
           <div>
-            <div className="mono" style={{fontSize:10, color:'var(--muted)', letterSpacing:'0.14em'}}>Q07 · CONFIDENTIAL</div>
+            <div className="mono" style={{fontSize:10, color:'var(--muted)', letterSpacing:'0.14em'}}>Q08 · CONFIDENTIAL</div>
             <div className="serif" style={{fontSize:15, fontWeight:600, marginTop:1}}>피칭 담당자 주민등록번호</div>
           </div>
         </div>
@@ -2587,7 +2606,7 @@ function SurveyTab({me, update}){
                placeholder="000000-0000000" style={{letterSpacing:'0.02em'}}/>
       </div>
 
-      <QBox num={8} icon={<MessageSquare size={14}/>} title="피칭 쇼케이스 및 행사 관련 의견 서술">
+      <QBox num={9} icon={<MessageSquare size={14}/>} title="피칭 쇼케이스 및 행사 관련 의견 서술">
         <textarea className="textarea" rows={5} value={form.feedback||''}
                   onChange={e=>setForm({...form, feedback:e.target.value})}
                   placeholder="요청사항, 특별 준비사항, 기타 협의하실 내용을 자유롭게 기입해주세요."
@@ -6608,6 +6627,7 @@ function SurveyDetail({survey}){
   const items = [
     {label:'MIFA 현장 통역 필요 여부', value: s.needsInterpreter ? (s.needsInterpreter==='O' ? '필요 (Yes)' : '불필요 (No)') : null},
     {label:'피칭덱 번역 지원 필요 여부', value: s.needsPitchDeckTranslation ? (s.needsPitchDeckTranslation==='O' ? '필요 (Yes)' : '불필요 (No)') : null},
+    {label:'큐카드 제작 희망 여부', value: s.needsCueCard ? (s.needsCueCard==='O' ? '희망 (Yes)' : '불희망 (No)') : null},
     {label:'모더레이터 소개 멘트 (영문)', value: s.moderatorIntroEn, multi:true},
     {label:'숙소 정보', value: s.accommodation, multi:true},
     {label:'항공 정보', value: s.flightInfo, multi:true},
