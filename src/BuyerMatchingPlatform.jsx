@@ -43,6 +43,9 @@ const makeExhibitor = (id, project, loginId, password, companyName) => ({
   // 회사 로고
   logoKey: null,
   logoMeta: null,
+  // 회사 대표 이미지 (메인 비주얼)
+  keyVisualKey: null,
+  keyVisualMeta: null,
   // IP 목록 (여러 개)
   ips: [],
   // 수요조사
@@ -205,6 +208,27 @@ function formatRuntimeSummary(ip){
     else             out.push(`${s} sec / ep`);
   }
   return out;
+}
+
+// IP Genre 표시값 — Others 선택 시 custom 값 결합
+function displayGenre(ip){
+  if (!ip || !ip.genre) return '';
+  const g = migrateGenre(ip.genre);
+  if (g === 'Others' && ip.genreCustom) return `Others · ${ip.genreCustom}`;
+  return g;
+}
+
+// IP Formats 표시값 — 다중 포맷 배열 (Others 선택 시 custom 값 결합)
+function displayFormats(ip){
+  if (!ip) return [];
+  const arr = Array.isArray(ip.formats) && ip.formats.length > 0
+    ? ip.formats
+    : (ip.format ? [ip.format] : []);
+  return arr.map(f => {
+    const mf = migrateFormat(f);
+    if (mf === 'Others' && ip.formatCustom) return `Others · ${ip.formatCustom}`;
+    return mf;
+  });
 }
 
 // ============================ DOMAIN CONSTANTS ============================
@@ -901,42 +925,48 @@ function ipBuyerMatchScore(ip, buyer) {
     }
   }
 
-  // [C] 장르 — IP 단일값 vs 바이어 다중값
+  // [C] 장르 — IP 단일값(또는 한국어 레거시) vs 바이어 다중값
   let scoreC = 0;
   const buyerGenres = getBuyerGenres(buyer);
-  if (ip.genre && buyerGenres.length > 0) {
-    if (buyerGenres.includes(ip.genre)) {
+  const ipGenre = migrateGenre(ip.genre);
+  if (ipGenre && buyerGenres.length > 0) {
+    if (buyerGenres.includes(ipGenre)) {
       scoreC += 10;
       detail.genre = true;
       detail.genreScore = 10;
-      detail.genreMatches = [ip.genre];
-      reasons.push(`장르 일치 · ${ip.genre} (+10)`);
+      detail.genreMatches = [ipGenre];
+      reasons.push(`장르 일치 · ${ipGenre} (+10)`);
     }
   }
 
-  // [D] 포맷 — IP 단일값 vs 바이어 다중값
+  // [D] 포맷 — IP 다중값(formats 우선, 없으면 format 단일값) vs 바이어 다중값
   let scoreD = 0;
   const buyerFormats = getBuyerFormats(buyer);
-  if (ip.format && buyerFormats.length > 0) {
-    if (buyerFormats.includes(ip.format)) {
-      scoreD += 10;
+  const ipFormats = Array.isArray(ip.formats) && ip.formats.length > 0
+    ? ip.formats.map(migrateFormat)
+    : (ip.format ? [migrateFormat(ip.format)] : []);
+  if (ipFormats.length > 0 && buyerFormats.length > 0) {
+    const matchedFormats = ipFormats.filter(f => buyerFormats.includes(f));
+    if (matchedFormats.length > 0) {
+      scoreD += 10;  // 1개라도 매칭되면 +10 (다중 매칭도 단일 점수)
       detail.format = true;
       detail.formatScore = 10;
-      detail.formatMatches = [ip.format];
-      reasons.push(`포맷 일치 · ${ip.format} (+10)`);
+      detail.formatMatches = matchedFormats;
+      reasons.push(`포맷 일치 · ${matchedFormats.join(', ')} (+10)`);
     }
   }
 
   // [E] 타겟 연령 — IP 단일값 vs 바이어 다중값
   let scoreE = 0;
   const buyerTargetAges = getBuyerTargetAges(buyer);
-  if (ip.targetAge && buyerTargetAges.length > 0) {
-    if (buyerTargetAges.includes(ip.targetAge)) {
+  const ipTargetAge = migrateTargetAge(ip.targetAge);
+  if (ipTargetAge && buyerTargetAges.length > 0) {
+    if (buyerTargetAges.includes(ipTargetAge)) {
       scoreE += 10;
       detail.targetAge = true;
       detail.targetAgeScore = 10;
-      detail.targetAgeMatches = [ip.targetAge];
-      reasons.push(`타겟 연령 일치 · ${ip.targetAge} (+10)`);
+      detail.targetAgeMatches = [ipTargetAge];
+      reasons.push(`타겟 연령 일치 · ${ipTargetAge} (+10)`);
     }
   }
 
@@ -2044,6 +2074,19 @@ function IntroTab({me, update}){
         <LogoUploader me={me} update={update}/>
       </div>
 
+      {/* Company Key Visual (대표 이미지) */}
+      <div className="card" style={{padding:28, marginTop:16}}>
+        <div className="serif" style={{fontSize:17, fontWeight:600, marginBottom:6, display:'flex', alignItems:'center', gap:8}}>
+          <Sparkles size={16}/> 회사 대표 이미지
+          <span style={{fontSize:11.5, color:'var(--muted)', fontWeight:400, fontFamily:'inherit', letterSpacing:'normal'}}>PNG, JPG · 200MB 이하</span>
+        </div>
+        <div style={{fontSize:12, color:'var(--muted)', marginBottom:14, lineHeight:1.6}}>
+          회사를 대표하는 메인 비주얼 이미지 한 장을 업로드해주세요. 프로그램북·홍보 자료·소개 페이지의 헤더 비주얼로 활용됩니다.
+          <strong style={{color:'var(--ink-2)', fontWeight:600}}> 300dpi 이상 고해상도</strong>를 권장하며, 이미지 사이즈에는 별도 제약이 없습니다.
+        </div>
+        <KeyVisualUploader me={me} update={update}/>
+      </div>
+
       {/* Company Intro */}
       <div className="card" style={{padding:28, marginTop:16}}>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
@@ -2083,7 +2126,10 @@ function IPsTab({me, update}){
   const openNew = () => {
     const id = 'IP-' + Date.now();
     setForm({
-      id, name:'', nameEn:'', introEn:'', genre:'', targetAge:'', format:'',
+      id, name:'', nameEn:'', introEn:'',
+      genre:'', genreCustom:'',
+      targetAge:'',
+      format:'', formats:[], formatCustom:'',
       desiredBuyerPriority:['','','',''],
       regions:[],
     });
@@ -2091,12 +2137,19 @@ function IPsTab({me, update}){
   };
 
   const openEdit = (ip) => {
+    // formats 배열 초기화 — 단일 format 필드(레거시)도 자동 변환
+    const formatsArr = Array.isArray(ip.formats)
+      ? ip.formats.map(migrateFormat)
+      : (ip.format ? [migrateFormat(ip.format)] : []);
     setForm({
       ...ip,
       // 기존 한국어 값이 들어있으면 영어로 자동 변환 (옵션 변경 마이그레이션)
       genre: migrateGenre(ip.genre),
+      genreCustom: ip.genreCustom || '',
       targetAge: migrateTargetAge(ip.targetAge),
-      format: migrateFormat(ip.format),
+      format: formatsArr[0] || '',           // 단일 호환 필드 (매칭 엔진 fallback)
+      formats: formatsArr,                    // 다중 포맷 배열
+      formatCustom: ip.formatCustom || '',
       desiredBuyerPriority: ip.desiredBuyerPriority || ['','','',''],
       regions: ip.regions || [],
     });
@@ -2196,9 +2249,9 @@ function IPsTab({me, update}){
                   {ip.nameEn && <div style={{fontSize:14, color:'var(--muted)', fontStyle:'normal'}}>/ {ip.nameEn}</div>}
                 </div>
                 <div style={{display:'flex', gap:6, flexWrap:'wrap', marginTop:12}}>
-                  {ip.genre     && <span className="chip">{ip.genre}</span>}
-                  {ip.format    && <span className="chip">{ip.format}</span>}
-                  {ip.targetAge && <span className="chip">{ip.targetAge}</span>}
+                  {displayGenre(ip) && <span className="chip">{displayGenre(ip)}</span>}
+                  {displayFormats(ip).map((f,i) => <span key={i} className="chip">{f}</span>)}
+                  {ip.targetAge && <span className="chip">{migrateTargetAge(ip.targetAge)}</span>}
                   {formatRuntimeSummary(ip).map((s,i) => <span key={i} className="chip" style={{background:'var(--paper)', borderColor:'var(--line)'}}>{s}</span>)}
                 </div>
               </div>
@@ -2317,10 +2370,17 @@ function IPsTab({me, update}){
             </div>
             <div>
               <label className="label">Genre</label>
-              <select className="select" value={form.genre||''} onChange={e=>setForm({...form, genre:e.target.value})}>
+              <select className="select" value={form.genre||''} onChange={e=>setForm({...form, genre:e.target.value, genreCustom: e.target.value === 'Others' ? (form.genreCustom||'') : ''})}>
                 <option value="">Select genre</option>
                 {GENRE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
               </select>
+              {form.genre === 'Others' && (
+                <input className="input"
+                  style={{marginTop:6}}
+                  value={form.genreCustom||''}
+                  onChange={e=>setForm({...form, genreCustom: e.target.value})}
+                  placeholder="Please specify the genre (e.g., Mystery, Documentary)"/>
+              )}
             </div>
             <div>
               <label className="label">Target Age</label>
@@ -2330,11 +2390,42 @@ function IPsTab({me, update}){
               </select>
             </div>
             <div style={{gridColumn:'1 / -1'}}>
-              <label className="label">Format</label>
-              <select className="select" value={form.format||''} onChange={e=>setForm({...form, format:e.target.value})}>
-                <option value="">Select format</option>
-                {FORMAT_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
-              </select>
+              <label className="label">
+                Format <span style={{color:'var(--muted)', fontWeight:400, marginLeft:6}}>(multiple selection)</span>
+              </label>
+              <div style={{display:'flex', flexWrap:'wrap', gap:6}}>
+                {FORMAT_OPTIONS.map(f => {
+                  const formats = Array.isArray(form.formats) ? form.formats : (form.format ? [form.format] : []);
+                  const selected = formats.includes(f);
+                  return (
+                    <button key={f} type="button"
+                      onClick={()=>{
+                        const cur = Array.isArray(form.formats) ? [...form.formats] : (form.format ? [form.format] : []);
+                        const next = selected ? cur.filter(x => x !== f) : [...cur, f];
+                        // Others 해제 시 formatCustom도 비움
+                        const newFormatCustom = next.includes('Others') ? (form.formatCustom||'') : '';
+                        setForm({...form, formats: next, format: next[0] || '', formatCustom: newFormatCustom});
+                      }}
+                      style={{
+                        padding:'7px 14px', borderRadius:999, cursor:'pointer',
+                        border: selected ? '1px solid var(--purple)' : '1px solid var(--line)',
+                        background: selected ? 'var(--purple)' : 'var(--paper)',
+                        color: selected ? '#fff' : 'var(--ink-2)',
+                        fontSize:12.5, fontWeight:600, fontFamily:'inherit',
+                        transition:'all .15s',
+                      }}>
+                      {f}
+                    </button>
+                  );
+                })}
+              </div>
+              {(Array.isArray(form.formats) ? form.formats : []).includes('Others') && (
+                <input className="input"
+                  style={{marginTop:8}}
+                  value={form.formatCustom||''}
+                  onChange={e=>setForm({...form, formatCustom: e.target.value})}
+                  placeholder="Please specify other format(s) — separate multiple with comma (e.g., VR Experience, Mobile Game)"/>
+              )}
             </div>
             <div style={{gridColumn:'1 / -1'}}>
               <label className="label">Details <span style={{color:'var(--muted)', fontWeight:400, marginLeft:6}}>(fill in applicable fields)</span></label>
@@ -2410,9 +2501,14 @@ function IPsTab({me, update}){
 
           <hr className="rule" style={{margin:'24px 0'}}/>
 
-          <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:10}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:8}}>
             <div className="label" style={{margin:0}}>IP 이미지</div>
             <div style={{fontSize:11, color:'var(--muted-2)'}}>복수 업로드 · PNG, JPG, WebP · 파일당 200MB 이하</div>
+          </div>
+          <div style={{padding:'10px 14px', background:'var(--ivory-2)', fontSize:11.5, color:'var(--muted)', marginBottom:10, lineHeight:1.6, borderRadius:'var(--radius-sm)', border:'1px solid var(--line)'}}>
+            <AlertCircle size={11} style={{display:'inline', marginRight:5, marginBottom:-1}}/>
+            <strong style={{color:'var(--ink-2)', fontWeight:600}}>이미지 가이드 · </strong>
+            글로벌 바이어 배포용 공식 자료(프로그램북·피칭덱·큐카드)에 활용되므로 <strong style={{color:'var(--ink-2)', fontWeight:600}}>300dpi 이상 고해상도 원본</strong>을 권장합니다. 이미지 사이즈에는 별도 제약이 없으니 키비주얼·캐릭터 시트 등 원본 그대로 업로드해주세요.
           </div>
           <IPImageUploader form={form} setForm={setForm}/>
 
@@ -5273,9 +5369,9 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                               #{idx+1} {ip.name || '(제목 미입력)'}
                             </div>
                             <div style={{display:'flex', flexWrap:'wrap', gap:3}}>
-                              {ip.genre && <span style={{fontSize:9.5, padding:'1px 6px', background:'var(--ivory-2)', borderRadius:3, color:'var(--ink-2)', fontWeight:500}}>{ip.genre}</span>}
-                              {ip.format && <span style={{fontSize:9.5, padding:'1px 6px', background:'var(--ivory-2)', borderRadius:3, color:'var(--ink-2)', fontWeight:500}}>{ip.format}</span>}
-                              {ip.targetAge && <span style={{fontSize:9.5, padding:'1px 6px', background:'var(--ivory-2)', borderRadius:3, color:'var(--ink-2)', fontWeight:500}}>{ip.targetAge}</span>}
+                              {displayGenre(ip) && <span style={{fontSize:9.5, padding:'1px 6px', background:'var(--ivory-2)', borderRadius:3, color:'var(--ink-2)', fontWeight:500}}>{displayGenre(ip)}</span>}
+                              {displayFormats(ip).map((f,i) => <span key={i} style={{fontSize:9.5, padding:'1px 6px', background:'var(--ivory-2)', borderRadius:3, color:'var(--ink-2)', fontWeight:500}}>{f}</span>)}
+                              {ip.targetAge && <span style={{fontSize:9.5, padding:'1px 6px', background:'var(--ivory-2)', borderRadius:3, color:'var(--ink-2)', fontWeight:500}}>{migrateTargetAge(ip.targetAge)}</span>}
                               {(ip.regions || []).slice(0, 3).map(r => {
                                 const rg = REGIONS.find(x => x.key === r);
                                 const lbl = rg?.label?.split(' · ')[0] || r;
@@ -5580,9 +5676,9 @@ function IpMatrixCard({ip, ipIndex, buyers, hasMeeting, selectedCell, setSelecte
             {ip.nameEn && <div style={{fontSize:12.5, color:'var(--muted)'}}>{ip.nameEn}</div>}
             {/* 메타 칩 */}
             <div style={{display:'flex', gap:5, flexWrap:'wrap', marginTop:10}}>
-              {ip.genre && <span className="chip" style={{background:'var(--paper)'}}>{ip.genre}</span>}
-              {ip.format && <span className="chip" style={{background:'var(--paper)'}}>{ip.format}</span>}
-              {ip.targetAge && <span className="chip" style={{background:'var(--paper)'}}>{ip.targetAge}</span>}
+              {displayGenre(ip) && <span className="chip" style={{background:'var(--paper)'}}>{displayGenre(ip)}</span>}
+              {displayFormats(ip).map((f,i) => <span key={i} className="chip" style={{background:'var(--paper)'}}>{f}</span>)}
+              {ip.targetAge && <span className="chip" style={{background:'var(--paper)'}}>{migrateTargetAge(ip.targetAge)}</span>}
               {(ip.regions || []).slice(0,3).map(r => {
                 const reg = REGIONS.find(x => x.key === r);
                 const ww = r === 'WW';
@@ -5940,6 +6036,102 @@ function LogoUploader({me, update}){
   );
 }
 
+// ============================================================================
+// 회사 대표 이미지 (메인 비주얼) 업로더 — 가로형 배너 권장
+// ============================================================================
+function KeyVisualUploader({me, update}){
+  const inputRef = useRef(null);
+  const [preview, setPreview] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!me.keyVisualKey) { setPreview(null); return; }
+    let cancelled=false;
+    loadBlob(me.keyVisualKey).then(d => !cancelled && setPreview(d));
+    return () => {cancelled=true;};
+  }, [me.keyVisualKey, me.id]);
+
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { alert('이미지 파일만 업로드 가능합니다.'); return; }
+    if (file.size > MAX_IMG_BYTES) {
+      alert(
+        `이미지 용량이 한도를 초과했습니다.\n` +
+        `\n` +
+        `• 현재 파일: ${formatBytes(file.size)}\n` +
+        `• 허용 한도: 200MB\n` +
+        `\n` +
+        `해결 방법:\n` +
+        `1. 이미지 압축 사이트 이용: tinypng.com, squoosh.app\n` +
+        `2. JPG 형식으로 저장 (PNG보다 용량 작음)`
+      );
+      return;
+    }
+    setBusy(true);
+    try {
+      // 기존 대표 이미지 있으면 삭제
+      if (me.keyVisualKey) await deleteBlob(me.keyVisualKey);
+      const key = `img:keyvisual:${me.id}`;
+      const payload = await saveBlob(key, file);
+      update(s => ({...s, exhibitors: s.exhibitors.map(x => x.id===me.id ? {
+        ...x, keyVisualKey: key, keyVisualMeta: { name: payload.name, type: payload.type, size: payload.size }
+      } : x)}));
+      setPreview(payload);
+    } catch (err) {
+      alert('업로드 실패: ' + (err.message || err));
+    }
+    setBusy(false);
+  };
+
+  const handleRemove = async () => {
+    if (!confirm('회사 대표 이미지를 삭제하시겠습니까?')) return;
+    if (me.keyVisualKey) await deleteBlob(me.keyVisualKey);
+    update(s => ({...s, exhibitors: s.exhibitors.map(x => x.id===me.id ? {
+      ...x, keyVisualKey: null, keyVisualMeta: null
+    } : x)}));
+    setPreview(null);
+  };
+
+  return (
+    <div>
+      {preview ? (
+        <div>
+          {/* 가로 비율 미리보기 — 16:9 비율 권장이라 가로로 길게 */}
+          <div style={{width:'100%', maxHeight:280, background:'var(--ivory-2)', borderRadius:'var(--radius)', display:'grid', placeItems:'center', overflow:'hidden', border:'1px solid var(--line)', marginBottom:14}}>
+            <img src={preview.data} style={{width:'100%', maxHeight:280, objectFit:'contain'}} alt="key visual"/>
+          </div>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, flexWrap:'wrap'}}>
+            <div style={{flex:1, minWidth:0}}>
+              <div style={{fontSize:13.5, fontWeight:600, wordBreak:'break-all'}}>{preview.name}</div>
+              <div style={{fontSize:11.5, color:'var(--muted)', marginTop:2}}>
+                {preview.type || 'image'} · {formatBytes(preview.size)}
+              </div>
+            </div>
+            <div style={{display:'flex', gap:8, flexShrink:0}}>
+              <button className="btn btn-ghost" onClick={()=>inputRef.current?.click()} disabled={busy}><Upload size={12}/>교체</button>
+              <button className="btn btn-danger" onClick={handleRemove} disabled={busy}><Trash2 size={12}/>삭제</button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <button onClick={()=>inputRef.current?.click()} disabled={busy} style={{
+          width:'100%', padding:36, border:'1px dashed var(--line)', borderRadius:'var(--radius)',
+          textAlign:'center', background:'var(--ivory-2)', cursor:'pointer', fontFamily:'inherit',
+          color:'var(--muted)', display:'flex', flexDirection:'column', alignItems:'center', gap:10,
+        }}>
+          <Upload size={22}/>
+          <div style={{fontSize:13.5, color:'var(--ink)', fontWeight:500}}>클릭하여 회사 대표 이미지 업로드</div>
+          <div style={{fontSize:11.5}}>PNG / JPG · 200MB 이하 · 가로형(16:9 등) 권장</div>
+          {busy && <div style={{fontSize:11}}>업로드 중…</div>}
+        </button>
+      )}
+      <input ref={inputRef} type="file" accept="image/*" style={{display:'none'}} onChange={handleUpload}/>
+    </div>
+  );
+}
+
 function IPImageUploader({form, setForm}){
   const inputRef = useRef(null);
   const [previews, setPreviews] = useState({});
@@ -6039,6 +6231,7 @@ function IPImageUploader({form, setForm}){
 function ExhibitorDetailModal({exhibitor, onClose, onEdit, readOnly}){
   const e = exhibitor;
   const [logo, setLogo] = useState(null);
+  const [keyVisual, setKeyVisual] = useState(null);
   const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
@@ -6047,6 +6240,13 @@ function ExhibitorDetailModal({exhibitor, onClose, onEdit, readOnly}){
     loadBlob(e.logoKey).then(d => !cancelled && setLogo(d));
     return () => {cancelled=true;};
   }, [e.id, e.logoKey]);
+
+  useEffect(() => {
+    if (!e.keyVisualKey) { setKeyVisual(null); return; }
+    let cancelled=false;
+    loadBlob(e.keyVisualKey).then(d => !cancelled && setKeyVisual(d));
+    return () => {cancelled=true;};
+  }, [e.id, e.keyVisualKey]);
 
   const stop = (ev) => ev.stopPropagation();
 
@@ -6107,7 +6307,9 @@ function ExhibitorDetailModal({exhibitor, onClose, onEdit, readOnly}){
         introEn: e.introEn,
         ips: (e.ips || []).map(ip => ({
           id: ip.id, name: ip.name, nameEn: ip.nameEn,
-          genre: ip.genre, targetAge: ip.targetAge, format: ip.format,
+          genre: ip.genre, genreCustom: ip.genreCustom,
+          targetAge: ip.targetAge,
+          format: ip.format, formats: ip.formats, formatCustom: ip.formatCustom,
           episodes: ip.episodes, seasons: ip.seasons,
           runtimeMin: ip.runtimeMin, runtimeSec: ip.runtimeSec,
           desiredBuyerPriority: ip.desiredBuyerPriority,
@@ -6236,6 +6438,31 @@ function ExhibitorDetailModal({exhibitor, onClose, onEdit, readOnly}){
             ) : (
               <div style={{padding:14, background:'var(--ivory-2)', fontSize:12.5, color:'var(--muted)', borderRadius:'var(--radius-sm)', marginBottom:16}}>
                 회사 로고 미업로드
+              </div>
+            )}
+
+            {/* 회사 대표 이미지 */}
+            {keyVisual ? (
+              <div className="card" style={{padding:18, marginBottom:16, background:'var(--ivory-2)', border:'1px solid var(--line)'}}>
+                <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:10}}>
+                  <div className="label" style={{margin:0}}>회사 대표 이미지</div>
+                  <div style={{fontSize:11.5, color:'var(--muted)'}}>{keyVisual.type} · {formatBytes(keyVisual.size)}</div>
+                </div>
+                <div style={{width:'100%', maxHeight:300, background:'var(--paper)', borderRadius:'var(--radius-sm)', overflow:'hidden', display:'grid', placeItems:'center', border:'1px solid var(--line)', marginBottom:10}}>
+                  <img src={keyVisual.data} style={{width:'100%', maxHeight:300, objectFit:'contain'}} alt="key visual"/>
+                </div>
+                <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:12}}>
+                  <div style={{fontSize:12.5, color:'var(--muted)', wordBreak:'break-all', flex:1}}>{keyVisual.name}</div>
+                  {!readOnly && (
+                  <button className="btn btn-primary" onClick={()=>downloadBlob(keyVisual)} style={{flexShrink:0}}>
+                    <Upload size={12} style={{transform:'rotate(180deg)'}}/>다운로드
+                  </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div style={{padding:14, background:'var(--ivory-2)', fontSize:12.5, color:'var(--muted)', borderRadius:'var(--radius-sm)', marginBottom:16}}>
+                회사 대표 이미지 미업로드
               </div>
             )}
             <div className="label" style={{marginBottom:6}}>Company Introduction (English)</div>
@@ -6521,9 +6748,9 @@ function IPDetailBlock({ip, idx, exhibitor, readOnly}){
           {ip.nameEn && <div style={{fontSize:12.5, color:'var(--muted)', marginTop:1}}>{ip.nameEn}</div>}
         </div>
         <div style={{display:'flex', gap:5, flexWrap:'wrap'}}>
-          {ip.genre && <span className="chip">{ip.genre}</span>}
-          {ip.format && <span className="chip">{ip.format}</span>}
-          {ip.targetAge && <span className="chip">{ip.targetAge}</span>}
+          {displayGenre(ip) && <span className="chip">{displayGenre(ip)}</span>}
+          {displayFormats(ip).map((f,i) => <span key={i} className="chip">{f}</span>)}
+          {ip.targetAge && <span className="chip">{migrateTargetAge(ip.targetAge)}</span>}
           {formatRuntimeSummary(ip).map((s,i) => <span key={i} className="chip" style={{background:'var(--paper)', borderColor:'var(--line)'}}>{s}</span>)}
         </div>
       </div>
