@@ -2533,7 +2533,7 @@ function IPsTab({me, update}){
 
 // ---------------- SURVEY TAB — 수요조사 ----------------
 function SurveyTab({me, update}){
-  const initial = me.survey || { needsInterpreter:null, needsPitchDeckTranslation:null, needsCueCard:null, moderatorIntroEn:'', accommodation:'', flightInfo:'', mailAddress:'', additionalTravelers:[], pitcherRRN:'', feedback:'' };
+  const initial = me.survey || { needsInterpreter:null, needsPitchDeckTranslation:null, needsCueCard:null, moderatorIntroEn:'', accommodation:'', flightInfo:'', mailAddress:'', additionalTravelers:[], pitcherRRN:'', travelDepartureDate:'', travelReturnDate:'', feedback:'' };
   const [form, setForm] = useState(initial);
   const [saved, setSaved] = useState(false);
   useEffect(()=>setForm(me.survey || initial), [me.id]);
@@ -2700,6 +2700,29 @@ function SurveyTab({me, update}){
         </div>
         <input className="input" value={form.pitcherRRN||''} onChange={e=>setForm({...form, pitcherRRN:e.target.value})}
                placeholder="000000-0000000" style={{letterSpacing:'0.02em'}}/>
+
+        {/* 보험 개시 일정 */}
+        <div style={{marginTop:22, paddingTop:18, borderTop:'1px solid var(--line)'}}>
+          <div className="serif" style={{fontSize:14, fontWeight:600, marginBottom:8, display:'flex', alignItems:'center', gap:7}}>
+            <Plane size={13}/> 여행자 보험 개시 일정
+          </div>
+          <div style={{fontSize:11.5, color:'var(--muted)', lineHeight:1.6, marginBottom:12, padding:'10px 12px', background:'var(--ivory-2)', borderRadius:'var(--radius-sm)'}}>
+            <AlertCircle size={11} style={{display:'inline', marginRight:4, marginBottom:-1}}/>
+            해외여행자 보험은 <strong style={{color:'var(--ink-2)', fontWeight:600}}>한국 출국일부터 귀국일까지 전체 여정</strong>을 기준으로 가입됩니다. MIFA 행사 기간만 입력하시면 출국 전·후 일정(경유·관광 등)에는 보험이 적용되지 않습니다. 인천 출발일부터 인천 도착일까지의 <strong style={{color:'var(--ink-2)', fontWeight:600}}>전체 출장 여정</strong>을 정확히 기입해주세요.
+          </div>
+          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
+            <div>
+              <label className="label" style={{fontSize:11.5}}>인천 출발일 (출국)</label>
+              <input className="input" type="date" value={form.travelDepartureDate||''}
+                     onChange={e=>setForm({...form, travelDepartureDate:e.target.value})}/>
+            </div>
+            <div>
+              <label className="label" style={{fontSize:11.5}}>인천 도착일 (귀국)</label>
+              <input className="input" type="date" value={form.travelReturnDate||''}
+                     onChange={e=>setForm({...form, travelReturnDate:e.target.value})}/>
+            </div>
+          </div>
+        </div>
       </div>
 
       <QBox num={9} icon={<MessageSquare size={14}/>} title="피칭 쇼케이스 및 행사 관련 의견 서술">
@@ -6859,6 +6882,10 @@ function SurveyDetail({survey}){
     {label:'숙소 정보', value: s.accommodation, multi:true},
     {label:'항공 정보', value: s.flightInfo, multi:true},
     {label:'우편 수령처', value: s.mailAddress, multi:true},
+    {label:'여행자 보험 일정 (인천 출발일 → 인천 도착일)',
+      value: (s.travelDepartureDate || s.travelReturnDate)
+        ? `${s.travelDepartureDate || '미입력'} → ${s.travelReturnDate || '미입력'}`
+        : null},
   ];
 
   const travelers = s.additionalTravelers || [];
