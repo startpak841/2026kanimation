@@ -2531,29 +2531,10 @@ function IPsTab({me, update}){
   );
 }
 
-// ---------------- SURVEY TAB — 수요조사 ----------------
-function SurveyTab({me, update}){
-  const initial = me.survey || { needsInterpreter:null, needsPitchDeckTranslation:null, needsCueCard:null, moderatorIntroEn:'', accommodation:'', flightInfo:'', mailAddress:'', additionalTravelers:[], pitcherRRN:'', travelDepartureDate:'', travelReturnDate:'', feedback:'' };
-  const [form, setForm] = useState(initial);
-  const [saved, setSaved] = useState(false);
-  useEffect(()=>setForm(me.survey || initial), [me.id]);
-
-  const save = () => {
-    const now = new Date().toISOString();
-    update(s => ({...s, exhibitors: s.exhibitors.map(e => e.id===me.id ? {
-      ...e, survey: form,
-      updatedAt: now,
-      sectionsUpdatedAt: {...(e.sectionsUpdatedAt || {}), survey: now},
-    } : e)}));
-    setSaved(true); setTimeout(()=>setSaved(false), 2000);
-  };
-
-  const travelers = form.additionalTravelers || [];
-  const addTraveler    = () => setForm({...form, additionalTravelers: [...travelers, {name:'', position:''}]});
-  const updateTraveler = (i, key, v) => setForm({...form, additionalTravelers: travelers.map((t,j) => j===i ? {...t, [key]:v} : t)});
-  const removeTraveler = (i) => setForm({...form, additionalTravelers: travelers.filter((_,j) => j !== i)});
-
-  const QBox = ({num, icon, title, children}) => (
+// 수요조사 항목 박스 — 컴포넌트 외부에 정의해야 매 렌더마다 재생성되지 않음
+// (내부 정의 시 textarea/input이 매번 unmount/remount → 커서 위치 reset 버그)
+function SurveyQBox({num, icon, title, children}){
+  return (
     <div className="card" style={{padding:24, marginTop:16}}>
       <div style={{display:'flex', alignItems:'center', gap:10, marginBottom:14}}>
         <div style={{width:28, height:28, background:'var(--ivory-2)', borderRadius:'var(--radius-sm)', display:'grid', placeItems:'center', color:'var(--muted)'}}>
@@ -2567,13 +2548,55 @@ function SurveyTab({me, update}){
       {children}
     </div>
   );
+}
+
+// ---------------- SURVEY TAB — 수요조사 ----------------
+function SurveyTab({me, update}){
+  // initial을 매 렌더마다 재생성하지 않도록 useMemo로 캐싱
+  const initial = useMemo(() => me.survey || {
+    needsInterpreter:null, needsPitchDeckTranslation:null, needsCueCard:null,
+    moderatorIntroEn:'', accommodation:'', flightInfo:'', mailAddress:'',
+    additionalTravelers:[], pitcherRRN:'', travelDepartureDate:'', travelReturnDate:'', feedback:''
+  }, [me.id]);
+  const [form, setForm] = useState(initial);
+  const [saved, setSaved] = useState(false);
+  // 입력 중인 form이 dirty인지 추적 (외부 동기화로 덮어쓰기 방지)
+  const [dirty, setDirty] = useState(false);
+  // me.id 변경(다른 참가사로 전환) 시에만 form 재초기화
+  // — 외부 동기화는 dirty=false일 때만 반영
+  useEffect(() => {
+    setForm(me.survey || initial);
+    setDirty(false);
+  }, [me.id]);
+
+  // 입력값 변경 헬퍼 — dirty 플래그도 같이 설정
+  const updateForm = (newForm) => {
+    setForm(newForm);
+    setDirty(true);
+  };
+
+  const save = () => {
+    const now = new Date().toISOString();
+    update(s => ({...s, exhibitors: s.exhibitors.map(e => e.id===me.id ? {
+      ...e, survey: form,
+      updatedAt: now,
+      sectionsUpdatedAt: {...(e.sectionsUpdatedAt || {}), survey: now},
+    } : e)}));
+    setDirty(false);  // 저장 완료 — 이제 외부 동기화 다시 받을 수 있음
+    setSaved(true); setTimeout(()=>setSaved(false), 2000);
+  };
+
+  const travelers = form.additionalTravelers || [];
+  const addTraveler    = () => updateForm({...form, additionalTravelers: [...travelers, {name:'', position:''}]});
+  const updateTraveler = (i, key, v) => updateForm({...form, additionalTravelers: travelers.map((t,j) => j===i ? {...t, [key]:v} : t)});
+  const removeTraveler = (i) => updateForm({...form, additionalTravelers: travelers.filter((_,j) => j !== i)});
 
   return (
     <div className="fade-in">
       <SectionHeader eyebrow="SECTION 04" title="참가사 수요조사 (On-site Survey)"
         desc="출장 및 현장 운영을 위한 정보를 수집합니다. 주민등록번호 등 민감정보는 여행자 보험 가입 등 공식 용도에만 사용되며 사업 종료 후 30일 이내 안전하게 파기됩니다." />
 
-      <QBox num={1} icon={<Languages size={14}/>} title="MIFA 기간 동안 현장 통역 필요 여부">
+      <SurveyQBox num={1} icon={<Languages size={14}/>} title="MIFA 기간 동안 현장 통역 필요 여부">
         <div style={{fontSize:12, color:'var(--muted)', marginBottom:10, lineHeight:1.6}}>
           MIFA 행사 기간 동안 비즈니스 미팅·피칭 쇼케이스 등 현장에서 한↔영(또는 한↔불) 통역 지원이 필요한지 선택해주세요.
         </div>
@@ -2582,16 +2605,16 @@ function SurveyTab({me, update}){
             {v:'O', label:'필요 (Yes)', icon:<Check size={14}/>},
             {v:'X', label:'불필요 (No)', icon:<X size={14}/>},
           ].map(opt => (
-            <button key={opt.v} onClick={()=>setForm({...form, needsInterpreter: opt.v})}
+            <button key={opt.v} onClick={()=>updateForm({...form, needsInterpreter: opt.v})}
               className={form.needsInterpreter===opt.v ? 'btn btn-primary' : 'btn btn-ghost'}
               style={{flex:1, justifyContent:'center', padding:'11px 24px'}}>
               {opt.icon}{opt.label}
             </button>
           ))}
         </div>
-      </QBox>
+      </SurveyQBox>
 
-      <QBox num={2} icon={<FileText size={14}/>} title="피칭덱 번역 지원 필요 여부">
+      <SurveyQBox num={2} icon={<FileText size={14}/>} title="피칭덱 번역 지원 필요 여부">
         <div style={{fontSize:12, color:'var(--muted)', marginBottom:10, lineHeight:1.6}}>
           피칭 쇼케이스 및 비즈니스 미팅에서 사용할 피칭덱(Pitch Deck)의 한→영 번역 지원이 필요한지 선택해주세요.
         </div>
@@ -2600,16 +2623,16 @@ function SurveyTab({me, update}){
             {v:'O', label:'필요 (Yes)', icon:<Check size={14}/>},
             {v:'X', label:'불필요 (No)', icon:<X size={14}/>},
           ].map(opt => (
-            <button key={opt.v} onClick={()=>setForm({...form, needsPitchDeckTranslation: opt.v})}
+            <button key={opt.v} onClick={()=>updateForm({...form, needsPitchDeckTranslation: opt.v})}
               className={form.needsPitchDeckTranslation===opt.v ? 'btn btn-primary' : 'btn btn-ghost'}
               style={{flex:1, justifyContent:'center', padding:'11px 24px'}}>
               {opt.icon}{opt.label}
             </button>
           ))}
         </div>
-      </QBox>
+      </SurveyQBox>
 
-      <QBox num={3} icon={<Layers size={14}/>} title="큐카드 제작 희망 여부">
+      <SurveyQBox num={3} icon={<Layers size={14}/>} title="큐카드 제작 희망 여부">
         <div style={{fontSize:12, color:'var(--muted)', marginBottom:10, lineHeight:1.6}}>
           큐카드는 IP 키비주얼을 활용한 피칭 스크립트 인쇄물입니다. 피칭 쇼케이스 무대에서 활용 가능합니다.
           <strong style={{color:'var(--ink-2)', fontWeight:600}}> 제작 희망 시 행사 전 최종 스크립트 파일을 운영 사무국에 별도로 전달해주셔야 합니다.</strong>
@@ -2619,45 +2642,45 @@ function SurveyTab({me, update}){
             {v:'O', label:'희망 (Yes)', icon:<Check size={14}/>},
             {v:'X', label:'불희망 (No)', icon:<X size={14}/>},
           ].map(opt => (
-            <button key={opt.v} onClick={()=>setForm({...form, needsCueCard: opt.v})}
+            <button key={opt.v} onClick={()=>updateForm({...form, needsCueCard: opt.v})}
               className={form.needsCueCard===opt.v ? 'btn btn-primary' : 'btn btn-ghost'}
               style={{flex:1, justifyContent:'center', padding:'11px 24px'}}>
               {opt.icon}{opt.label}
             </button>
           ))}
         </div>
-      </QBox>
+      </SurveyQBox>
 
-      <QBox num={4} icon={<MessageSquare size={14}/>} title="피칭 쇼케이스 모더레이터 소개 멘트 (영어)">
+      <SurveyQBox num={4} icon={<MessageSquare size={14}/>} title="피칭 쇼케이스 모더레이터 소개 멘트 (영어)">
         <textarea className="textarea" rows={5} value={form.moderatorIntroEn||''}
-                  onChange={e=>setForm({...form, moderatorIntroEn:e.target.value})}
+                  onChange={e=>updateForm({...form, moderatorIntroEn:e.target.value})}
                   placeholder="Write the English introduction script the moderator will read on stage. e.g., 'Next up, we welcome Climax Studio, a Seoul-based animation studio with a portfolio of award-winning kids IPs...'"
                   style={{lineHeight:1.7}}/>
-      </QBox>
+      </SurveyQBox>
 
-      <QBox num={5} icon={<Home size={14}/>} title="MIFA 출장 기간 숙소명 및 주소">
+      <SurveyQBox num={5} icon={<Home size={14}/>} title="MIFA 출장 기간 숙소명 및 주소">
         <div style={{fontSize:12, color:'var(--muted)', marginBottom:10, lineHeight:1.6}}>
           개별로 숙소를 예약하신 경우 호텔명·주소·체크인/체크아웃 일자를 기입해주세요.
           <strong style={{color:'var(--ink-2)', fontWeight:600}}> 운영 사무국에서 숙소가 제공되는 경우 비워두셔도 됩니다.</strong>
         </div>
         <textarea className="textarea" rows={3} value={form.accommodation||''}
-                  onChange={e=>setForm({...form, accommodation:e.target.value})}
+                  onChange={e=>updateForm({...form, accommodation:e.target.value})}
                   placeholder="예) Hôtel Mercure Annecy Centre · 26 Av. du Parmelan · Check-in 2026-06-10 / Check-out 2026-06-15"/>
-      </QBox>
+      </SurveyQBox>
 
-      <QBox num={6} icon={<Plane size={14}/>} title="MIFA 출장 항공 정보">
+      <SurveyQBox num={6} icon={<Plane size={14}/>} title="MIFA 출장 항공 정보">
         <textarea className="textarea" rows={3} value={form.flightInfo||''}
-                  onChange={e=>setForm({...form, flightInfo:e.target.value})}
+                  onChange={e=>updateForm({...form, flightInfo:e.target.value})}
                   placeholder="출국·입국 편명과 일시. 예) 출국 KE901 2026-06-09 13:45 ICN → CDG / 입국 KE902 2026-06-16 19:20 CDG → ICN"/>
-      </QBox>
+      </SurveyQBox>
 
-      <QBox num={7} icon={<Mail size={14}/>} title="출장자료 우편 수령처 주소">
+      <SurveyQBox num={7} icon={<Mail size={14}/>} title="출장자료 우편 수령처 주소">
         <textarea className="textarea" rows={2} value={form.mailAddress||''}
-                  onChange={e=>setForm({...form, mailAddress:e.target.value})}
+                  onChange={e=>updateForm({...form, mailAddress:e.target.value})}
                   placeholder="출장 전 자료를 발송할 국내 주소입니다. 회사 주소 또는 담당자 수령 가능 주소 (우편번호 포함)"/>
-      </QBox>
+      </SurveyQBox>
 
-      <QBox num={8} icon={<Users size={14}/>} title="피칭 담당자 외 출장 인원">
+      <SurveyQBox num={8} icon={<Users size={14}/>} title="피칭 담당자 외 출장 인원">
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
           <div style={{fontSize:12, color:'var(--muted)'}}>{travelers.length}명 등록됨</div>
           <button className="btn btn-ghost" style={{padding:'6px 12px', fontSize:12}} onClick={addTraveler}><Plus size={12}/>인원 추가</button>
@@ -2682,7 +2705,7 @@ function SurveyTab({me, update}){
               ))}
             </div>
         }
-      </QBox>
+      </SurveyQBox>
 
       <div className="card" style={{padding:24, marginTop:16, borderLeft:'3px solid var(--ink)'}}>
         <div style={{display:'flex', alignItems:'center', gap:10, marginBottom:10}}>
@@ -2698,7 +2721,7 @@ function SurveyTab({me, update}){
           <Shield size={11} style={{display:'inline', marginRight:4, marginBottom:-1}}/>
           여행자 보험 가입 목적으로만 사용됩니다. 사업 종료 후 30일 이내 안전하게 파기되며, 제3자에게 제공되지 않습니다.
         </div>
-        <input className="input" value={form.pitcherRRN||''} onChange={e=>setForm({...form, pitcherRRN:e.target.value})}
+        <input className="input" value={form.pitcherRRN||''} onChange={e=>updateForm({...form, pitcherRRN:e.target.value})}
                placeholder="000000-0000000" style={{letterSpacing:'0.02em'}}/>
 
         {/* 보험 개시 일정 */}
@@ -2714,26 +2737,27 @@ function SurveyTab({me, update}){
             <div>
               <label className="label" style={{fontSize:11.5}}>인천 출발일 (출국)</label>
               <input className="input" type="date" value={form.travelDepartureDate||''}
-                     onChange={e=>setForm({...form, travelDepartureDate:e.target.value})}/>
+                     onChange={e=>updateForm({...form, travelDepartureDate:e.target.value})}/>
             </div>
             <div>
               <label className="label" style={{fontSize:11.5}}>인천 도착일 (귀국)</label>
               <input className="input" type="date" value={form.travelReturnDate||''}
-                     onChange={e=>setForm({...form, travelReturnDate:e.target.value})}/>
+                     onChange={e=>updateForm({...form, travelReturnDate:e.target.value})}/>
             </div>
           </div>
         </div>
       </div>
 
-      <QBox num={9} icon={<MessageSquare size={14}/>} title="피칭 쇼케이스 및 행사 관련 의견 서술">
+      <SurveyQBox num={9} icon={<MessageSquare size={14}/>} title="피칭 쇼케이스 및 행사 관련 의견 서술">
         <textarea className="textarea" rows={5} value={form.feedback||''}
-                  onChange={e=>setForm({...form, feedback:e.target.value})}
+                  onChange={e=>updateForm({...form, feedback:e.target.value})}
                   placeholder="요청사항, 특별 준비사항, 기타 협의하실 내용을 자유롭게 기입해주세요."
                   style={{lineHeight:1.7}}/>
-      </QBox>
+      </SurveyQBox>
 
       <div style={{marginTop:28, display:'flex', justifyContent:'flex-end', alignItems:'center', gap:16}}>
         {saved && <span style={{color:'var(--green)', fontSize:13, display:'flex', alignItems:'center', gap:6}}><Check size={14}/>수요조사가 저장되었습니다</span>}
+        {dirty && !saved && <span style={{color:'var(--amber)', fontSize:13, display:'flex', alignItems:'center', gap:6}}><AlertCircle size={14}/>저장하지 않은 변경 사항이 있습니다</span>}
         <button className="btn btn-primary" onClick={save} style={{padding:'12px 24px'}}><Save size={14}/>수요조사 전체 저장</button>
       </div>
     </div>
