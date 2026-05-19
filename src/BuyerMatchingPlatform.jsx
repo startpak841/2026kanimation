@@ -486,6 +486,28 @@ const EVENT_CONFIG = {
   },
 };
 
+// ============================ BLOCKED SLOTS ============================
+// 행사 전체 공식 일정(피칭쇼케이스 등)으로 인해 미팅 편성이 불가한 시간대.
+// 참가사·관리자 모두 해당 슬롯에 미팅 등록이 차단됨.
+const BLOCKED_SLOTS = [
+  {
+    id: 'mifa-kanimation-showcase-2026',
+    project: 'MIFA',
+    date: '2026-06-24',
+    times: ['10:30','11:00','11:30','12:00'],  // 30분 슬롯 단위 (10:30~12:30 차단)
+    type: 'showcase',
+    title: 'Kanimation Showcase: Fresh Voices from Korea',
+    schedule: '6월 24일(수) 11:00 – 12:15',
+    venue: 'Imperial Palace · Verdi Room (Level 3)',
+    note: '한국 애니메이션 신규 IP 피칭 쇼케이스 — 전 참가사 필참',
+  },
+];
+
+// 특정 (프로젝트, 날짜, 시간)이 차단된 슬롯인지 확인 + 해당 차단 정보 반환
+function getBlockedSlot(project, date, time){
+  return BLOCKED_SLOTS.find(b => b.project === project && b.date === date && b.times.includes(time)) || null;
+}
+
 function generateTimeSlots(start, end, mins){
   const [sh, sm] = start.split(':').map(Number);
   const [eh, em] = end.split(':').map(Number);
@@ -760,13 +782,14 @@ function mapExhibitorNameToId(name, exhibitors, pKey){
 }
 
 // 해당 참가사 + 날짜에서 가장 이른(오전부터) 빈 시간 슬롯 찾기
-function findFirstAvailableSlot(exhibitorId, date, meetings, eventConfig){
+function findFirstAvailableSlot(exhibitorId, date, meetings, eventConfig, project){
   if (!eventConfig) return null;
   const slots = generateTimeSlots(eventConfig.timeStart, eventConfig.timeEnd, eventConfig.slotMinutes);
   const used = new Set(meetings
     .filter(m => m.exhibitorId === exhibitorId && m.date === date)
     .map(m => m.time));
-  return slots.find(t => !used.has(t)) || null;
+  // 차단 슬롯도 사용 불가로 처리
+  return slots.find(t => !used.has(t) && !getBlockedSlot(project, date, t)) || null;
 }
 
 function ProjectBadge({project, size='sm'}){
@@ -3013,6 +3036,12 @@ function MyMeetingsTab({state, update, me}){
   );
 
   const openCreate = (time) => {
+    // 차단 슬롯 검사
+    const blocked = getBlockedSlot(project, selectedDate, time);
+    if (blocked) {
+      alert(`해당 시간대는 공식 일정으로 차단되어 있습니다.\n\n• ${blocked.title}\n• ${blocked.schedule}\n• ${blocked.venue}\n\n다른 시간대를 선택해주세요.`);
+      return;
+    }
     setSlotAction({
       type:'create', time,
       form:{companyName:'', contactName:'', position:'', email:'', phone:''},
@@ -3190,6 +3219,46 @@ function MyMeetingsTab({state, update, me}){
               <tbody>
                 {slots.map(time => {
                   const ms = meetingsAt(time);
+                  const blocked = getBlockedSlot(project, selectedDate, time);
+                  // 차단 슬롯 — 공식 일정으로 미팅 등록 불가
+                  if (blocked) {
+                    const isFirstBlockedSlot = blocked.times[0] === time;
+                    return (
+                      <tr key={time}>
+                        <td className="mono tabular" style={{fontSize:12.5, fontWeight:500, color:'var(--muted-2)', verticalAlign:'top', paddingTop:12}}>
+                          {time}
+                        </td>
+                        <td style={{padding:6, background:'repeating-linear-gradient(135deg, #FEF3C7 0px, #FEF3C7 10px, #FDE68A 10px, #FDE68A 20px)'}}>
+                          {isFirstBlockedSlot ? (
+                            <div style={{
+                              padding:'14px 18px', borderRadius:'var(--radius-sm)',
+                              background:'#92400E', color:'#fff',
+                              display:'flex', flexDirection:'column', gap:5,
+                            }}>
+                              <div className="mono" style={{fontSize:9.5, letterSpacing:'0.18em', color:'#FBBF24', fontWeight:700, display:'flex', alignItems:'center', gap:6}}>
+                                <Lock size={10}/> OFFICIAL SCHEDULE · 미팅 등록 불가
+                              </div>
+                              <div style={{fontSize:14, fontWeight:700, marginTop:3}}>피칭 쇼케이스</div>
+                              <div style={{fontSize:12, opacity:0.95, lineHeight:1.45}}>{blocked.title}</div>
+                              <div style={{display:'flex', gap:18, marginTop:5, fontSize:11, opacity:0.9, flexWrap:'wrap'}}>
+                                <span className="mono">🕘 {blocked.schedule}</span>
+                                <span>📍 {blocked.venue}</span>
+                              </div>
+                              {blocked.note && (
+                                <div style={{fontSize:11, opacity:0.85, marginTop:3, paddingTop:6, borderTop:'1px solid rgba(255,255,255,0.2)'}}>
+                                  {blocked.note}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div style={{height:34, display:'grid', placeItems:'center'}}>
+                              <span className="mono" style={{fontSize:9.5, color:'#92400E', opacity:0.6, letterSpacing:'0.12em'}}>● ● ●</span>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  }
                   return (
                     <tr key={time}>
                       <td className="mono tabular" style={{fontSize:12.5, fontWeight:500, color: ms.length > 0 ? 'var(--ink)' : 'var(--muted)', verticalAlign:'top', paddingTop:12}}>
@@ -4974,6 +5043,14 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
   const handleDrop = (exId, time) => {
     if (readOnly) return;
     if (!draggingId) return;
+    // 차단 슬롯 검사
+    const blocked = getBlockedSlot(subProject, selectedDate, time);
+    if (blocked) {
+      alert(`해당 시간대는 공식 일정으로 차단되어 있습니다.\n\n• ${blocked.title}\n• ${blocked.schedule}\n• ${blocked.venue}\n\n다른 시간대로 이동해주세요.`);
+      setDraggingId(null);
+      setDropTarget(null);
+      return;
+    }
     update(s => {
       const meeting = s.meetings.find(m => m.id === draggingId);
       if (!meeting) return s;
@@ -4996,6 +5073,12 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
 
   const openNew = (exhibitorId, time) => {
     if (readOnly) return;
+    // 차단 슬롯 검사
+    const blocked = getBlockedSlot(subProject, selectedDate, time);
+    if (blocked) {
+      alert(`해당 시간대는 공식 일정으로 차단되어 있습니다.\n\n• ${blocked.title}\n• ${blocked.schedule}\n• ${blocked.venue}\n\n다른 시간대를 선택해주세요.`);
+      return;
+    }
     setModalMode('new');
     setModalData({
       exhibitorId,
@@ -5269,6 +5352,39 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                         const ms = meetingsAtCell(ex.id, time);
                         const cellKey = `${ex.id}|${time}`;
                         const isDropTarget = dropTarget === cellKey;
+                        const blocked = getBlockedSlot(subProject, selectedDate, time);
+                        // 차단된 슬롯 — 모든 참가사 컬럼에 동일하게 표시
+                        if (blocked) {
+                          // 차단 시간대의 첫 슬롯에만 정보 카드 표시, 나머지는 visual continuation
+                          const isFirstBlockedSlot = blocked.times[0] === time;
+                          return (
+                            <td key={ex.id}
+                              style={{
+                                padding:4, borderBottom:'1px solid var(--line-2)', borderRight:'1px solid var(--line-2)',
+                                verticalAlign:'top',
+                                background: 'repeating-linear-gradient(135deg, #FEF3C7 0px, #FEF3C7 8px, #FDE68A 8px, #FDE68A 16px)',
+                              }}>
+                              {isFirstBlockedSlot ? (
+                                <div style={{
+                                  minHeight: 34 * blocked.times.length + 4 * (blocked.times.length - 1),
+                                  padding:'10px 12px', display:'flex', flexDirection:'column', justifyContent:'center', alignItems:'center', gap:4,
+                                  background:'#92400E', color:'#fff', borderRadius:'var(--radius-sm)',
+                                  textAlign:'center',
+                                }}>
+                                  <div className="mono" style={{fontSize:9, letterSpacing:'0.18em', color:'#FBBF24', fontWeight:700}}>OFFICIAL SCHEDULE</div>
+                                  <div style={{fontSize:12.5, fontWeight:700, lineHeight:1.25, marginTop:2}}>피칭 쇼케이스</div>
+                                  <div style={{fontSize:10, opacity:0.95, lineHeight:1.4, marginTop:2}}>{blocked.title}</div>
+                                  <div className="mono" style={{fontSize:10, marginTop:3, opacity:0.85}}>{blocked.schedule}</div>
+                                  <div style={{fontSize:10, opacity:0.85, lineHeight:1.3}}>{blocked.venue}</div>
+                                </div>
+                              ) : (
+                                <div style={{height:34, display:'grid', placeItems:'center'}}>
+                                  <span className="mono" style={{fontSize:9, color:'#92400E', opacity:0.6, letterSpacing:'0.1em'}}>● ● ●</span>
+                                </div>
+                              )}
+                            </td>
+                          );
+                        }
                         return (
                           <td key={ex.id}
                             onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropTarget(cellKey); }}
@@ -7575,7 +7691,7 @@ function RsvpTab({state, fullState, update, project, readOnly}){
             );
             if (exists) return;
 
-            const slot = findFirstAvailableSlot(exhId, date, meetings, eventConfig);
+            const slot = findFirstAvailableSlot(exhId, date, meetings, eventConfig, buyerProject);
             if (slot) {
               meetings.push({
                 id: `MT-AUTO-${Date.now()}-${meetingsCreated}-${Math.random().toString(36).slice(2,5)}`,
