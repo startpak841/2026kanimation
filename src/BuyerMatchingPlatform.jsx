@@ -3270,6 +3270,14 @@ function MyMeetingsTab({state, update, me}){
                             const b = getBuyer(m.buyerId);
                             const editable = canEdit(m);
                             const col = projectColor(me.project);
+                            // 미팅 상태 배지
+                            const status = m.status || 'confirmed';
+                            const statusConfig = {
+                              confirmed: { label: '확정',  bg: '#16A34A', fg: '#fff', icon: <Check size={10}/> },
+                              tentative: { label: '조율중', bg: '#EAB308', fg: '#1F2937', icon: <Clock size={10}/> },
+                              cancelled: { label: '취소',  bg: '#DC2626', fg: '#fff', icon: <X size={10}/> },
+                            }[status] || { label: '확정', bg: '#16A34A', fg: '#fff', icon: <Check size={10}/> };
+                            const isCancelled = status === 'cancelled';
                             return (
                               <div key={m.id} onClick={()=>openEdit(m)}
                                 style={{
@@ -3277,10 +3285,12 @@ function MyMeetingsTab({state, update, me}){
                                   background: editable ? col.bg : 'var(--ivory-2)',
                                   color: editable ? col.fg : 'var(--ink)',
                                   border: editable ? `1px solid ${col.bg}` : '1px solid var(--line)',
-                                  display:'flex', alignItems:'center', gap:12,
+                                  display:'flex', alignItems:'center', gap:10, flexWrap:'wrap',
                                   transition:'all .15s',
+                                  opacity: isCancelled ? 0.6 : 1,
+                                  textDecoration: isCancelled ? 'line-through' : 'none',
                                 }}
-                                title={editable ? '본인 편성 미팅 · 클릭하여 편집/삭제' : '운영사 편성 미팅 · 클릭하여 조회'}>
+                                title={`${editable ? '본인 편성 미팅' : '운영사 편성 미팅'} · 상태: ${statusConfig.label} · 클릭하여 ${editable ? '편집/삭제' : '조회'}`}>
                                 {editable ? (
                                   <span style={{display:'inline-flex', alignItems:'center', gap:4, padding:'3px 9px', fontSize:10.5, fontWeight:600, background:'rgba(255,255,255,0.22)', color: col.fg, borderRadius:999, flexShrink:0}}>
                                     본인 편성
@@ -3290,7 +3300,16 @@ function MyMeetingsTab({state, update, me}){
                                     <Lock size={9}/>운영사
                                   </span>
                                 )}
-                                <span style={{fontSize:13.5, fontWeight:600, flex:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
+                                {/* 상태 배지 */}
+                                <span style={{
+                                  display:'inline-flex', alignItems:'center', gap:4,
+                                  padding:'3px 9px', borderRadius:999, flexShrink:0,
+                                  background: statusConfig.bg, color: statusConfig.fg,
+                                  fontSize: 10.5, fontWeight:700, letterSpacing:'0.02em',
+                                }}>
+                                  {statusConfig.icon}{statusConfig.label}
+                                </span>
+                                <span style={{fontSize:13.5, fontWeight:600, flex:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', minWidth:0}}>
                                   {b?.companyName || '—'}
                                 </span>
                                 <span style={{flexShrink:0, opacity:0.85}}>
@@ -5051,13 +5070,44 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
       setDropTarget(null);
       return;
     }
+    // 드래그 중인 미팅 정보 미리 확인 (state 외부에서)
+    const sourceMeeting = fullState.meetings.find(m => m.id === draggingId);
+    // 동일 위치 드롭 방지 (제자리)
+    if (sourceMeeting && sourceMeeting.exhibitorId === exId && sourceMeeting.time === time && sourceMeeting.date === selectedDate) {
+      setDraggingId(null);
+      setDropTarget(null);
+      return;
+    }
+    // 같은 셀에 이미 미팅이 있으면 충돌 확인
+    const existingAtTarget = fullState.meetings.filter(m =>
+      m.id !== draggingId &&
+      m.exhibitorId === exId &&
+      m.date === selectedDate &&
+      m.time === time
+    );
+    if (existingAtTarget.length > 0) {
+      const existingNames = existingAtTarget.map(m => {
+        const b = fullState.buyers.find(bu => bu.id === m.buyerId);
+        return b?.companyName || '미상';
+      }).join(', ');
+      const ok = confirm(
+        `이 시간 슬롯에 이미 미팅이 있습니다:\n` +
+        `• ${existingNames}\n\n` +
+        `같은 슬롯에 추가 미팅을 편성하시겠습니까? (취소하면 이동 안 함)`
+      );
+      if (!ok) {
+        setDraggingId(null);
+        setDropTarget(null);
+        return;
+      }
+    }
     update(s => {
       const meeting = s.meetings.find(m => m.id === draggingId);
       if (!meeting) return s;
       const newDate = selectedDate;
       const newTime = time;
       const newExhId = exId;
-      // 미팅 업데이트
+      // 미팅 업데이트 (map으로 동일 ID만 갱신 — 절대 중복 생성 안 됨)
       const meetings = s.meetings.map(m => m.id === draggingId
         ? {...m, exhibitorId: newExhId, time: newTime, date: newDate}
         : m);
@@ -5233,33 +5283,55 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
         </div>
       )}
 
-      {/* 미팅 출처별 색상 범례 */}
+      {/* 미팅 출처별 색상 범례 + 상태 범례 */}
       <div style={{
-        marginTop:16, padding:'10px 14px',
+        marginTop:16, padding:'12px 14px',
         background:'var(--ivory-2)',
         border:'1px solid var(--line)',
         borderRadius:'var(--radius-sm)',
         fontSize:11.5, color:'var(--ink-2)',
-        display:'flex', alignItems:'center', gap:18, flexWrap:'wrap',
+        display:'flex', flexDirection:'column', gap:10,
       }}>
-        <span className="mono" style={{fontSize:10, letterSpacing:'0.15em', color:'var(--muted)', fontWeight:700}}>
-          미팅 출처
-        </span>
-        <span style={{display:'inline-flex', alignItems:'center', gap:6}}>
-          <span style={{display:'inline-block', width:18, height:14, background:'#06B6D4', borderRadius:3}}/>
-          참가사 등록
-        </span>
-        <span style={{display:'inline-flex', alignItems:'center', gap:6}}>
-          <span style={{display:'inline-block', width:18, height:14, background:'#F59E0B', borderRadius:3}}/>
-          관리자 편성
-        </span>
-        <span style={{display:'inline-flex', alignItems:'center', gap:6}}>
-          <span style={{display:'inline-block', width:18, height:14, background:'#6B7280', borderRadius:3}}/>
-          자동 생성 (CSV)
-        </span>
-        <span style={{fontSize:10.5, color:'var(--muted)', marginLeft:'auto'}}>
-          미팅 슬롯 색상으로 출처 구분 · 호버 시 상세 표시
-        </span>
+        <div style={{display:'flex', alignItems:'center', gap:18, flexWrap:'wrap'}}>
+          <span className="mono" style={{fontSize:10, letterSpacing:'0.15em', color:'var(--muted)', fontWeight:700, minWidth:80}}>
+            출처
+          </span>
+          <span style={{display:'inline-flex', alignItems:'center', gap:6}}>
+            <span style={{display:'inline-block', width:18, height:14, background:'#06B6D4', borderRadius:3}}/>
+            참가사 등록
+          </span>
+          <span style={{display:'inline-flex', alignItems:'center', gap:6}}>
+            <span style={{display:'inline-block', width:18, height:14, background:'#F59E0B', borderRadius:3}}/>
+            관리자 편성
+          </span>
+          <span style={{display:'inline-flex', alignItems:'center', gap:6}}>
+            <span style={{display:'inline-block', width:18, height:14, background:'#6B7280', borderRadius:3}}/>
+            자동 생성 (CSV)
+          </span>
+        </div>
+        <div style={{display:'flex', alignItems:'center', gap:18, flexWrap:'wrap', paddingTop:8, borderTop:'1px solid var(--line-2)'}}>
+          <span className="mono" style={{fontSize:10, letterSpacing:'0.15em', color:'var(--muted)', fontWeight:700, minWidth:80}}>
+            상태
+          </span>
+          <span style={{display:'inline-flex', alignItems:'center', gap:6}}>
+            <span style={{display:'inline-flex', alignItems:'center', gap:3, padding:'2px 7px', borderRadius:3, background:'#16A34A', color:'#fff', fontSize:10, fontWeight:700}}>
+              <Check size={9}/>확정
+            </span>
+            정식 편성 완료
+          </span>
+          <span style={{display:'inline-flex', alignItems:'center', gap:6}}>
+            <span style={{display:'inline-flex', alignItems:'center', gap:3, padding:'2px 7px', borderRadius:3, background:'#EAB308', color:'#1F2937', fontSize:10, fontWeight:700}}>
+              <Clock size={9}/>조율중
+            </span>
+            일정 협의 중
+          </span>
+          <span style={{display:'inline-flex', alignItems:'center', gap:6}}>
+            <span style={{display:'inline-flex', alignItems:'center', gap:3, padding:'2px 7px', borderRadius:3, background:'#DC2626', color:'#fff', fontSize:10, fontWeight:700}}>
+              <X size={9}/>취소
+            </span>
+            취소 (흐림 + 취소선)
+          </span>
+        </div>
       </div>
 
       {/* 행사 서브 스위처 */}
@@ -5412,33 +5484,67 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                                 const sourceLabel = isExhibitor ? '참가사 등록'
                                                   : isAdmin ? '관리자 편성'
                                                   : '자동 생성 (CSV)';
+                                // 미팅 상태 배지 정보
+                                const status = m.status || 'confirmed';
+                                const statusConfig = {
+                                  confirmed: { label: '확정',  bg: '#16A34A', fg: '#fff', icon: <Check size={9}/> },
+                                  tentative: { label: '조율중', bg: '#EAB308', fg: '#1F2937', icon: <Clock size={9}/> },
+                                  cancelled: { label: '취소',  bg: '#DC2626', fg: '#fff', icon: <X size={9}/> },
+                                }[status] || { label: '확정', bg: '#16A34A', fg: '#fff', icon: <Check size={9}/> };
+                                // 취소된 미팅은 흐리게
+                                const isCancelled = status === 'cancelled';
                                 return (
                                   <div key={m.id}
                                     draggable
                                     onDragStart={e => {
                                       if (readOnly) { e.preventDefault(); return; }
                                       setDraggingId(m.id);
+                                      // 드래그 시작 시 onClick 트리거를 무시하도록 플래그
+                                      e.currentTarget.dataset.dragging = '1';
                                       e.dataTransfer.effectAllowed = 'move';
                                       e.dataTransfer.setData('text/plain', m.id);
                                     }}
-                                    onDragEnd={() => { setDraggingId(null); setDropTarget(null); }}
-                                    onClick={()=>{ if (!readOnly) openEdit(m); }}
+                                    onDragEnd={e => {
+                                      setDraggingId(null);
+                                      setDropTarget(null);
+                                      // 드래그 종료 직후 onClick이 발화하지 않도록 짧게 플래그 유지
+                                      setTimeout(() => {
+                                        if (e.currentTarget) e.currentTarget.dataset.dragging = '';
+                                      }, 100);
+                                    }}
+                                    onClick={e => {
+                                      // 드래그 직후 onClick이 발화한 경우 무시
+                                      if (e.currentTarget.dataset.dragging === '1') return;
+                                      if (!readOnly) openEdit(m);
+                                    }}
                                     style={{
                                       padding:'8px 10px',
                                       borderRadius:'var(--radius-sm)',
                                       cursor: readOnly ? 'default' : 'grab',
                                       background: bg, color: fg,
                                       transition:'all .15s', minHeight:34,
-                                      display:'flex', alignItems:'center', justifyContent:'center',
-                                      opacity: dragging ? 0.4 : 1,
+                                      display:'flex', alignItems:'center', justifyContent:'space-between', gap:6,
+                                      opacity: dragging ? 0.4 : (isCancelled ? 0.55 : 1),
+                                      textDecoration: isCancelled ? 'line-through' : 'none',
                                       boxShadow: dragging ? 'none' : '0 1px 2px rgba(0,0,0,0.08)',
+                                      position:'relative',
                                     }}
                                     title={readOnly
-                                      ? `${buyer?.companyName || '—'} · ${buyer?.contactName || '—'}\n출처: ${sourceLabel}`
-                                      : `${buyer?.companyName || '—'} · ${buyer?.contactName || '—'}\n출처: ${sourceLabel}\n드래그로 이동 · 클릭으로 편집`}>
-                                    <div style={{fontSize:12, fontWeight:600, lineHeight:1.2, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', width:'100%', textAlign:'center'}}>
+                                      ? `${buyer?.companyName || '—'} · ${buyer?.contactName || '—'}\n출처: ${sourceLabel}\n상태: ${statusConfig.label}`
+                                      : `${buyer?.companyName || '—'} · ${buyer?.contactName || '—'}\n출처: ${sourceLabel}\n상태: ${statusConfig.label}\n드래그로 이동 · 클릭으로 편집`}>
+                                    <div style={{fontSize:12, fontWeight:600, lineHeight:1.2, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', flex:1, textAlign:'left'}}>
                                       {buyer?.companyName || '—'}
                                     </div>
+                                    {/* 상태 배지 — 확정/조율중/취소 한눈에 */}
+                                    <span style={{
+                                      display:'inline-flex', alignItems:'center', gap:3,
+                                      padding:'2px 6px', borderRadius:3,
+                                      background: statusConfig.bg, color: statusConfig.fg,
+                                      fontSize: 9.5, fontWeight:700, letterSpacing:'0.02em',
+                                      flexShrink:0, lineHeight:1,
+                                    }}>
+                                      {statusConfig.icon}{statusConfig.label}
+                                    </span>
                                   </div>
                                 );
                               })}
