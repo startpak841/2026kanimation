@@ -58,11 +58,18 @@ const makeExhibitor = (id, project, loginId, password, companyName) => ({
 
 const defaultState = {
   exhibitors: [
+    // MIFA 참가사
     makeExhibitor('EX-MIFA-01',   'MIFA',   'climax',     '4728', '클라이맥스 스튜디오'),
     makeExhibitor('EX-MIFA-02',   'MIFA',   'pixtrend',   '3165', '픽스트랜드'),
     makeExhibitor('EX-MIFA-03',   'MIFA',   'devsisters', '8492', '데브시스터즈'),
     makeExhibitor('EX-MIFA-04',   'MIFA',   'shelter',    '5037', '스튜디오쉘터'),
     makeExhibitor('EX-MIFA-05',   'MIFA',   'animal',     '9184', '스튜디오애니멀'),
+    // MIPCOM 참가사
+    makeExhibitor('EX-MIPCOM-01', 'MIPCOM', 'pixtrend-mipcom', '3165', '픽스트랜드'),
+    makeExhibitor('EX-MIPCOM-02', 'MIPCOM', 'dreamfactory',    '6274', '드림팩토리'),
+    makeExhibitor('EX-MIPCOM-03', 'MIPCOM', 'animal-mipcom',   '9184', '스튜디오애니멀'),
+    makeExhibitor('EX-MIPCOM-04', 'MIPCOM', 'sunwoo',          '4092', '선우엔터테인먼트'),
+    makeExhibitor('EX-MIPCOM-05', 'MIPCOM', 'storyfarm',       '7128', '스토리팜'),
   ],
   buyers: [],
   meetings: [],
@@ -471,8 +478,13 @@ const EVENT_CONFIG = {
     slotMinutes: 30,
   },
   MIPCOM: {
-    label: 'MIPCOM 2026',
-    dates: [], // 날짜 미확정
+    label: 'MIPCOM Cannes 2026',
+    dates: [
+      { date: '2026-10-12', dow: '월 · Mon' },
+      { date: '2026-10-13', dow: '화 · Tue' },
+      { date: '2026-10-14', dow: '수 · Wed' },
+      { date: '2026-10-15', dow: '목 · Thu' },
+    ],
     timeStart: '09:00',
     timeEnd:   '19:00',
     slotMinutes: 30,
@@ -485,6 +497,45 @@ const EVENT_CONFIG = {
     slotMinutes: 30,
   },
 };
+
+// 프로젝트별 수요조사 라벨·placeholder — 참가사 소속 프로젝트에 맞춰 자동 치환
+const SURVEY_LABELS = {
+  MIFA: {
+    shortName: 'MIFA',
+    fullName: 'MIFA Annecy 2026',
+    city: 'Annecy',
+    airport: 'CDG',
+    airportCity: 'Paris (Charles de Gaulle)',
+    dateRange: '2026-06-23 ~ 2026-06-26',
+    accommodationPlaceholder: '예) Hôtel Mercure Annecy Centre · 26 Av. du Parmelan · Check-in 2026-06-22 / Check-out 2026-06-27',
+    flightPlaceholder: '출국·입국 편명과 일시. 예) 출국 KE901 2026-06-21 13:45 ICN → CDG / 입국 KE902 2026-06-28 19:20 CDG → ICN',
+  },
+  MIPCOM: {
+    shortName: 'MIPCOM',
+    fullName: 'MIPCOM Cannes 2026',
+    city: 'Cannes',
+    airport: 'NCE',
+    airportCity: 'Nice Côte d\'Azur',
+    dateRange: '2026-10-12 ~ 2026-10-15',
+    accommodationPlaceholder: '예) Hôtel Barrière Le Majestic Cannes · 10 Boulevard de la Croisette · Check-in 2026-10-11 / Check-out 2026-10-16',
+    flightPlaceholder: '출국·입국 편명과 일시. 예) 출국 KE267 2026-10-10 13:20 ICN → NCE (또는 경유 CDG → NCE) / 입국 KE268 2026-10-17 20:30 NCE → ICN',
+  },
+  CANADA: {
+    shortName: 'CANADA',
+    fullName: 'Canada Event 2026',
+    city: 'Toronto',
+    airport: 'YYZ',
+    airportCity: 'Toronto Pearson',
+    dateRange: '',
+    accommodationPlaceholder: '호텔명, 주소, 체크인 / 체크아웃 일자를 기입해주세요.',
+    flightPlaceholder: '출국·입국 편명과 일시. 예) 출국 KE073 ICN → YYZ / 입국 KE074 YYZ → ICN',
+  },
+};
+
+// 프로젝트 코드로 라벨 세트 반환 (없으면 MIFA 폴백)
+function getSurveyLabels(project){
+  return SURVEY_LABELS[project] || SURVEY_LABELS.MIFA;
+}
 
 // ============================ BLOCKED SLOTS ============================
 // 행사 전체 공식 일정(피칭쇼케이스 등)으로 인해 미팅 편성이 불가한 시간대.
@@ -2575,6 +2626,8 @@ function SurveyQBox({num, icon, title, children}){
 
 // ---------------- SURVEY TAB — 수요조사 ----------------
 function SurveyTab({me, update}){
+  // 참가사 프로젝트에 맞는 수요조사 라벨 (MIFA/MIPCOM/CANADA별)
+  const labels = getSurveyLabels(me.project);
   // initial을 매 렌더마다 재생성하지 않도록 useMemo로 캐싱
   const initial = useMemo(() => me.survey || {
     needsInterpreter:null, needsPitchDeckTranslation:null, needsCueCard:null,
@@ -2619,9 +2672,36 @@ function SurveyTab({me, update}){
       <SectionHeader eyebrow="SECTION 04" title="참가사 수요조사 (On-site Survey)"
         desc="출장 및 현장 운영을 위한 정보를 수집합니다. 주민등록번호 등 민감정보는 여행자 보험 가입 등 공식 용도에만 사용되며 사업 종료 후 30일 이내 안전하게 파기됩니다." />
 
-      <SurveyQBox num={1} icon={<Languages size={14}/>} title="MIFA 기간 동안 현장 통역 필요 여부">
+      {/* 프로젝트 컨텍스트 배너 - 참가사가 어느 행사 기준으로 응답하는지 명확히 */}
+      <div style={{
+        marginTop:16, padding:'14px 18px',
+        background: 'linear-gradient(135deg, var(--ivory-2) 0%, var(--paper) 100%)',
+        border:'1px solid var(--line)', borderLeft:'3px solid var(--purple)',
+        borderRadius:'var(--radius-sm)',
+        display:'flex', alignItems:'center', gap:14, flexWrap:'wrap',
+      }}>
+        <div style={{
+          display:'inline-flex', alignItems:'center', gap:6,
+          padding:'4px 10px', background:'var(--purple-lt)', color:'var(--purple-dk)',
+          borderRadius:3, fontSize:10.5, fontWeight:700, letterSpacing:'0.06em',
+        }}>
+          <Calendar size={11}/>{labels.shortName}
+        </div>
+        <div style={{flex:1, minWidth:0}}>
+          <div style={{fontSize:13.5, fontWeight:600, color:'var(--ink)'}}>{labels.fullName}</div>
+          <div style={{fontSize:11.5, color:'var(--muted)', marginTop:2}}>
+            📅 {labels.dateRange || '일정 미확정'} · 📍 {labels.city}, France
+            {labels.airport && ` · ✈️ ${labels.airportCity} (${labels.airport})`}
+          </div>
+        </div>
+        <div style={{fontSize:11, color:'var(--muted-2)', fontStyle:'italic'}}>
+          {labels.shortName} 출장 기준으로 응답해주세요
+        </div>
+      </div>
+
+      <SurveyQBox num={1} icon={<Languages size={14}/>} title={`${labels.shortName} 기간 동안 현장 통역 필요 여부`}>
         <div style={{fontSize:12, color:'var(--muted)', marginBottom:10, lineHeight:1.6}}>
-          MIFA 행사 기간 동안 비즈니스 미팅·피칭 쇼케이스 등 현장에서 한↔영(또는 한↔불) 통역 지원이 필요한지 선택해주세요.
+          {labels.shortName} 행사 기간 동안 비즈니스 미팅·피칭 쇼케이스 등 현장에서 한↔영(또는 한↔불) 통역 지원이 필요한지 선택해주세요.
         </div>
         <div style={{display:'flex', gap:8}}>
           {[
@@ -2681,20 +2761,20 @@ function SurveyTab({me, update}){
                   style={{lineHeight:1.7}}/>
       </SurveyQBox>
 
-      <SurveyQBox num={5} icon={<Home size={14}/>} title="MIFA 출장 기간 숙소명 및 주소">
+      <SurveyQBox num={5} icon={<Home size={14}/>} title={`${labels.shortName} 출장 기간 숙소명 및 주소`}>
         <div style={{fontSize:12, color:'var(--muted)', marginBottom:10, lineHeight:1.6}}>
           개별로 숙소를 예약하신 경우 호텔명·주소·체크인/체크아웃 일자를 기입해주세요.
           <strong style={{color:'var(--ink-2)', fontWeight:600}}> 운영 사무국에서 숙소가 제공되는 경우 비워두셔도 됩니다.</strong>
         </div>
         <textarea className="textarea" rows={3} value={form.accommodation||''}
                   onChange={e=>updateForm({...form, accommodation:e.target.value})}
-                  placeholder="예) Hôtel Mercure Annecy Centre · 26 Av. du Parmelan · Check-in 2026-06-10 / Check-out 2026-06-15"/>
+                  placeholder={labels.accommodationPlaceholder}/>
       </SurveyQBox>
 
-      <SurveyQBox num={6} icon={<Plane size={14}/>} title="MIFA 출장 항공 정보">
+      <SurveyQBox num={6} icon={<Plane size={14}/>} title={`${labels.shortName} 출장 항공 정보`}>
         <textarea className="textarea" rows={3} value={form.flightInfo||''}
                   onChange={e=>updateForm({...form, flightInfo:e.target.value})}
-                  placeholder="출국·입국 편명과 일시. 예) 출국 KE901 2026-06-09 13:45 ICN → CDG / 입국 KE902 2026-06-16 19:20 CDG → ICN"/>
+                  placeholder={labels.flightPlaceholder}/>
       </SurveyQBox>
 
       <SurveyQBox num={7} icon={<Mail size={14}/>} title="출장자료 우편 수령처 주소">
@@ -2754,7 +2834,7 @@ function SurveyTab({me, update}){
           </div>
           <div style={{fontSize:11.5, color:'var(--muted)', lineHeight:1.6, marginBottom:12, padding:'10px 12px', background:'var(--ivory-2)', borderRadius:'var(--radius-sm)'}}>
             <AlertCircle size={11} style={{display:'inline', marginRight:4, marginBottom:-1}}/>
-            해외여행자 보험은 <strong style={{color:'var(--ink-2)', fontWeight:600}}>한국 출국일부터 귀국일까지 전체 여정</strong>을 기준으로 가입됩니다. MIFA 행사 기간만 입력하시면 출국 전·후 일정(경유·관광 등)에는 보험이 적용되지 않습니다. 인천 출발일부터 인천 도착일까지의 <strong style={{color:'var(--ink-2)', fontWeight:600}}>전체 출장 여정</strong>을 정확히 기입해주세요.
+            해외여행자 보험은 <strong style={{color:'var(--ink-2)', fontWeight:600}}>한국 출국일부터 귀국일까지 전체 여정</strong>을 기준으로 가입됩니다. {labels.shortName} 행사 기간만 입력하시면 출국 전·후 일정(경유·관광 등)에는 보험이 적용되지 않습니다. 인천 출발일부터 인천 도착일까지의 <strong style={{color:'var(--ink-2)', fontWeight:600}}>전체 출장 여정</strong>을 정확히 기입해주세요.
           </div>
           <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
             <div>
@@ -6749,7 +6829,7 @@ function ExhibitorDetailModal({exhibitor, onClose, onEdit, readOnly}){
 
           {/* 수요조사 */}
           <DetailSection title="수요조사" eyebrow="SECTION 04">
-            <SurveyDetail survey={e.survey}/>
+            <SurveyDetail survey={e.survey} project={e.project}/>
           </DetailSection>
         </div>
       </div>
@@ -7116,17 +7196,18 @@ function AdminImageCard({img, prefix}){
   );
 }
 
-function SurveyDetail({survey}){
+function SurveyDetail({survey, project}){
   const s = survey || {};
+  const labels = getSurveyLabels(project);
   const [showRRN, setShowRRN] = useState(false);
 
   const items = [
-    {label:'MIFA 현장 통역 필요 여부', value: s.needsInterpreter ? (s.needsInterpreter==='O' ? '필요 (Yes)' : '불필요 (No)') : null},
+    {label:`${labels.shortName} 현장 통역 필요 여부`, value: s.needsInterpreter ? (s.needsInterpreter==='O' ? '필요 (Yes)' : '불필요 (No)') : null},
     {label:'피칭덱 번역 지원 필요 여부', value: s.needsPitchDeckTranslation ? (s.needsPitchDeckTranslation==='O' ? '필요 (Yes)' : '불필요 (No)') : null},
     {label:'큐카드 제작 희망 여부', value: s.needsCueCard ? (s.needsCueCard==='O' ? '희망 (Yes)' : '불희망 (No)') : null},
     {label:'모더레이터 소개 멘트 (영문)', value: s.moderatorIntroEn, multi:true},
-    {label:'숙소 정보', value: s.accommodation, multi:true},
-    {label:'항공 정보', value: s.flightInfo, multi:true},
+    {label:`숙소 정보 (${labels.city})`, value: s.accommodation, multi:true},
+    {label:`항공 정보 (ICN ↔ ${labels.airport})`, value: s.flightInfo, multi:true},
     {label:'우편 수령처', value: s.mailAddress, multi:true},
     {label:'여행자 보험 일정 (인천 출발일 → 인천 도착일)',
       value: (s.travelDepartureDate || s.travelReturnDate)
