@@ -120,6 +120,8 @@ async function participantFromRow(r, { includeIps = true } = {}) {
     phone: r.phone,
     logoKey: r.logo_path,  // storage path
     logoMeta: r.logo_meta,
+    keyVisualKey: r.key_visual_path,
+    keyVisualMeta: r.key_visual_meta,
     introEn: r.intro_en,
     survey: r.survey || {},
     updatedAt: r.updated_at,
@@ -261,6 +263,8 @@ export const participantsAPI = {
     if (fields.introEn !== undefined)        payload.intro_en = fields.introEn;
     if (fields.logoKey !== undefined)        payload.logo_path = fields.logoKey;
     if (fields.logoMeta !== undefined)       payload.logo_meta = fields.logoMeta;
+    if (fields.keyVisualKey !== undefined)   payload.key_visual_path = fields.keyVisualKey;
+    if (fields.keyVisualMeta !== undefined)  payload.key_visual_meta = fields.keyVisualMeta;
     if (fields.survey !== undefined)         payload.survey = fields.survey;
     if (fields.sectionsUpdatedAt !== undefined) payload.sections_updated_at = fields.sectionsUpdatedAt;
 
