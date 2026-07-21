@@ -2763,8 +2763,8 @@ function SurveyTab({me, update}){
 
       <SurveyQBox num={5} icon={<Home size={14}/>} title={`${labels.shortName} 출장 기간 숙소명 및 주소`}>
         <div style={{fontSize:12, color:'var(--muted)', marginBottom:10, lineHeight:1.6}}>
-          개별로 숙소를 예약하신 경우 호텔명·주소·체크인/체크아웃 일자를 기입해주세요.
-          <strong style={{color:'var(--ink-2)', fontWeight:600}}> 운영 사무국에서 숙소가 제공되는 경우 비워두셔도 됩니다.</strong>
+          숙박은 <strong style={{color:'var(--ink-2)', fontWeight:600}}>개별 예약 방식으로 진행되며, 숙박 지원금으로 지급</strong>됩니다.
+          출장 기간 중 <strong style={{color:'var(--ink-2)', fontWeight:600}}>안전 관리 차원</strong>에서 호텔명·주소·체크인/체크아웃 일자를 취합하오니 정확히 기입해주세요.
         </div>
         <textarea className="textarea" rows={3} value={form.accommodation||''}
                   onChange={e=>updateForm({...form, accommodation:e.target.value})}
