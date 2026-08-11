@@ -491,9 +491,13 @@ const EVENT_CONFIG = {
   },
   CANADA: {
     label: 'Canada Event 2026',
-    dates: [],
-    timeStart: '09:00',
-    timeEnd:   '19:00',
+    // 일자별 운영시간이 다른 행사 — date 항목의 timeStart/timeEnd가 있으면 그것이 우선 적용됨
+    dates: [
+      { date: '2026-11-03', dow: '화 · Tue', timeStart: '13:30', timeEnd: '18:00' },
+      { date: '2026-11-04', dow: '수 · Wed', timeStart: '10:00', timeEnd: '16:00' },
+    ],
+    timeStart: '10:00',
+    timeEnd:   '18:00',
     slotMinutes: 30,
   },
 };
@@ -572,6 +576,20 @@ function generateTimeSlots(start, end, mins){
     cur += mins;
   }
   return slots;
+}
+
+// 날짜별 개별 운영시간(dates 항목의 timeStart/timeEnd)이 있으면 우선 적용 — CANADA처럼 일자별 시간이 다른 행사 지원
+function getTimeRangeForDate(config, date){
+  const d = (config?.dates || []).find(x => x.date === date);
+  return {
+    start: d?.timeStart || config?.timeStart || '09:00',
+    end:   d?.timeEnd   || config?.timeEnd   || '19:00',
+  };
+}
+
+function getSlotsForDate(config, date){
+  const r = getTimeRangeForDate(config, date);
+  return generateTimeSlots(r.start, r.end, config?.slotMinutes || 30);
 }
 
 // ============================ 회사명 → 분야 자동 추정 ============================
@@ -835,7 +853,7 @@ function mapExhibitorNameToId(name, exhibitors, pKey){
 // 해당 참가사 + 날짜에서 가장 이른(오전부터) 빈 시간 슬롯 찾기
 function findFirstAvailableSlot(exhibitorId, date, meetings, eventConfig, project){
   if (!eventConfig) return null;
-  const slots = generateTimeSlots(eventConfig.timeStart, eventConfig.timeEnd, eventConfig.slotMinutes);
+  const slots = getSlotsForDate(eventConfig, date);
   const used = new Set(meetings
     .filter(m => m.exhibitorId === exhibitorId && m.date === date)
     .map(m => m.time));
@@ -3090,9 +3108,8 @@ function PreferredContentFull({buyer, compact=false}){
 function MyMeetingsTab({state, update, me}){
   const project = me.project;
   const config = EVENT_CONFIG[project] || EVENT_CONFIG.MIFA;
-  const slots = useMemo(() => generateTimeSlots(config.timeStart, config.timeEnd, config.slotMinutes), [project]);
-
   const [selectedDate, setSelectedDate] = useState(config.dates[0]?.date || '');
+  const slots = useMemo(() => getSlotsForDate(config, selectedDate), [project, selectedDate]);
   const [slotAction, setSlotAction] = useState(null);
   // slotAction: null | { type:'create'|'edit', time, meeting?, form:{buyerId, table, notes} }
 
@@ -3282,7 +3299,7 @@ function MyMeetingsTab({state, update, me}){
             본인 편성 <span className="mono tabular">{editableCount}건</span> · 운영사 편성 <span className="mono tabular">{filledCount - editableCount}건</span>
           </div>
           <div className="mono" style={{fontSize:10.5, letterSpacing:'0.15em'}}>
-            {config.timeStart} – {config.timeEnd} · {config.slotMinutes}분 슬롯
+            {getTimeRangeForDate(config, selectedDate).start} – {getTimeRangeForDate(config, selectedDate).end} · {config.slotMinutes}분 슬롯
           </div>
         </div>
 
@@ -5115,7 +5132,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
 
   useEffect(() => { setSelectedDate(config.dates[0]?.date || ''); }, [subProject]);
 
-  const slots = useMemo(() => generateTimeSlots(config.timeStart, config.timeEnd, config.slotMinutes), [subProject]);
+  const slots = useMemo(() => getSlotsForDate(config, selectedDate), [subProject, selectedDate]);
 
   const exhibitorsInProject = fullState.exhibitors.filter(e => e.project === subProject);
   const meetingsForDate = fullState.meetings.filter(m => {
@@ -5441,7 +5458,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
         <div style={{marginLeft:16, fontSize:12, color:'var(--muted)'}}>
           <span className="serif" style={{fontWeight:600, color:'var(--ink)'}}>{config.label}</span>
           {config.dates.length > 0 && (
-            <> · {config.dates.length}일 · {config.timeStart}~{config.timeEnd} · {config.slotMinutes}분 슬롯</>
+            <> · {config.dates.length}일 · {getTimeRangeForDate(config, selectedDate).start}~{getTimeRangeForDate(config, selectedDate).end} · {config.slotMinutes}분 슬롯</>
           )}
         </div>
       </div>
@@ -7931,7 +7948,7 @@ function RsvpTab({state, fullState, update, project, readOnly}){
 
     // 한글 깨짐 감지 함수 — 깨진 한글 패턴이 많으면 EUC-KR로 재시도
     const isProbablyMojibake = (text) => {
-      // UTF-8로 EUC-KR 텍스트를 읽으면  (0xFFFD) 문자가 자주 나타남
+      // UTF-8로 EUC-KR 텍스트를 읽으면 �(0xFFFD) 문자가 자주 나타남
       const replacementChars = (text.match(/\uFFFD/g) || []).length;
       // 한글 문자가 거의 없는데 텍스트가 많으면 의심
       const koreanChars = (text.match(/[\uAC00-\uD7AF]/g) || []).length;
