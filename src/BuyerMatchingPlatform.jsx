@@ -65,11 +65,11 @@ const defaultState = {
     makeExhibitor('EX-MIFA-04',   'MIFA',   'shelter',    '5037', '스튜디오쉘터'),
     makeExhibitor('EX-MIFA-05',   'MIFA',   'animal',     '9184', '스튜디오애니멀'),
     // MIPCOM 참가사
-    makeExhibitor('EX-MIPCOM-01', 'MIPCOM', 'pixtrend-mipcom', '3165', '픽스트랜드'),
-    makeExhibitor('EX-MIPCOM-02', 'MIPCOM', 'dreamfactory',    '6274', '드림팩토리'),
-    makeExhibitor('EX-MIPCOM-03', 'MIPCOM', 'animal-mipcom',   '9184', '스튜디오애니멀'),
-    makeExhibitor('EX-MIPCOM-04', 'MIPCOM', 'sunwoo',          '4092', '선우엔터테인먼트'),
-    makeExhibitor('EX-MIPCOM-05', 'MIPCOM', 'storyfarm',       '7128', '스토리팜'),
+    makeExhibitor('EX-MIPCOM-01', 'MIPCOM', 'pixtrend-mipcom', '3165', '㈜픽스트랜드'),
+    makeExhibitor('EX-MIPCOM-02', 'MIPCOM', 'dreamfactory',    '6274', '㈜드림팩토리스튜디오'),
+    makeExhibitor('EX-MIPCOM-03', 'MIPCOM', 'animal-mipcom',   '9184', '㈜스튜디오애니멀'),
+    makeExhibitor('EX-MIPCOM-04', 'MIPCOM', 'sunwoo',          '4092', '㈜선우앤컴퍼니'),
+    makeExhibitor('EX-MIPCOM-05', 'MIPCOM', 'storyfarm',       '7128', '㈜이야기농장'),
   ],
   buyers: [],
   meetings: [],
@@ -2656,7 +2656,7 @@ function SurveyTab({me, update}){
   const initial = useMemo(() => me.survey || {
     needsInterpreter:null, needsPitchDeckTranslation:null, needsCueCard:null,
     moderatorIntroEn:'', accommodation:'', flightInfo:'', mailAddress:'',
-    additionalTravelers:[], pitcherRRN:'', travelDepartureDate:'', travelReturnDate:'', feedback:''
+    additionalTravelers:[], wishBuyers:[], pitcherRRN:'', travelDepartureDate:'', travelReturnDate:'', feedback:''
   }, [me.id]);
   const [form, setForm] = useState(initial);
   const [saved, setSaved] = useState(false);
@@ -2690,6 +2690,14 @@ function SurveyTab({me, update}){
   const addTraveler    = () => updateForm({...form, additionalTravelers: [...travelers, {name:'', position:''}]});
   const updateTraveler = (i, key, v) => updateForm({...form, additionalTravelers: travelers.map((t,j) => j===i ? {...t, [key]:v} : t)});
   const removeTraveler = (i) => updateForm({...form, additionalTravelers: travelers.filter((_,j) => j !== i)});
+
+  // 만나고 싶은 바이어 명단 — MIPCOM·CANADA에만 노출
+  const showWishBuyers = me.project === 'MIPCOM' || me.project === 'CANADA';
+  const wOffset = showWishBuyers ? 1 : 0;
+  const wishBuyers = form.wishBuyers || [];
+  const addWishBuyer    = () => updateForm({...form, wishBuyers: [...wishBuyers, {category:'', name:'', company:'', position:'', email:'', memo:''}]});
+  const updateWishBuyer = (i, key, v) => updateForm({...form, wishBuyers: wishBuyers.map((b,j) => j===i ? {...b, [key]:v} : b)});
+  const removeWishBuyer = (i) => updateForm({...form, wishBuyers: wishBuyers.filter((_,j) => j !== i)});
 
   return (
     <div className="fade-in">
@@ -2877,7 +2885,67 @@ function SurveyTab({me, update}){
         </div>
       </div>
 
-      <SurveyQBox num={9+qOffset} icon={<MessageSquare size={14}/>} title="피칭 쇼케이스 및 행사 관련 의견 서술">
+      {/* 만나고 싶은 바이어 명단 — MIPCOM·CANADA 전용 */}
+      {showWishBuyers && (
+      <SurveyQBox num={9+qOffset} icon={<Target size={14}/>} title="만나고 싶은 바이어 명단">
+        <div style={{fontSize:12, color:'var(--muted)', marginBottom:10, lineHeight:1.6}}>
+          만나고 싶은 특정 바이어가 있으면 입력해주세요. 특정 바이어가 없으시면 회사명을 비워두고 관심 산업·분류만 선택하셔도 됩니다. 하단 [+ 바이어 추가]로 무제한 추가 가능합니다.
+        </div>
+        <div style={{fontSize:11.5, color:'var(--muted)', marginBottom:12, padding:'8px 12px', background:'var(--ivory-2)', borderRadius:'var(--radius-sm)'}}>
+          입력란에 <strong style={{color:'var(--ink-2)', fontWeight:600}}>회색으로 흐리게</strong> 표시된 글자(예: Gildong Hong, A Company)는 <strong style={{color:'var(--ink-2)', fontWeight:600}}>작성 예시</strong>일 뿐 실제 입력값이 아닙니다. 직접 입력해주세요.
+        </div>
+        {wishBuyers.length === 0
+          ? <div style={{padding:20, background:'var(--ivory-2)', fontSize:12.5, color:'var(--muted)', textAlign:'center', borderRadius:'var(--radius-sm)'}}>
+              [+ 바이어 추가] 버튼으로 만나고 싶은 바이어를 등록해주세요. 없으면 비워두셔도 됩니다.
+            </div>
+          : <div style={{display:'flex', flexDirection:'column', gap:12}}>
+              {wishBuyers.map((b, i) => (
+                <div key={i} style={{border:'1px solid var(--line)', borderRadius:'var(--radius-sm)', padding:14, background:'var(--paper)'}}>
+                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
+                    <span className="mono" style={{fontSize:10.5, color:'var(--muted)', letterSpacing:'0.1em'}}>#{String(i+1).padStart(2,'0')}</span>
+                    <button className="btn btn-danger" style={{padding:'4px 10px', fontSize:11}} onClick={()=>removeWishBuyer(i)}><Trash2 size={11}/>삭제</button>
+                  </div>
+                  <div style={{display:'grid', gridTemplateColumns:'1.3fr 1fr 1fr 1fr 1.2fr', gap:8, marginBottom:8}}>
+                    <div>
+                      <label className="label" style={{fontSize:10.5}}>산업·분류 <span style={{color:'var(--muted-2)', fontWeight:400}}>(바이어 미정 시 선택)</span></label>
+                      <select className="input" value={b.category||''} onChange={e=>updateWishBuyer(i, 'category', e.target.value)}>
+                        <option value="">선택</option>
+                        {BUYER_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label" style={{fontSize:10.5}}>이름 <span style={{color:'var(--muted-2)', fontWeight:400}}>(선택)</span></label>
+                      <input className="input" value={b.name||''} onChange={e=>updateWishBuyer(i, 'name', e.target.value)} placeholder="Gildong Hong"/>
+                    </div>
+                    <div>
+                      <label className="label" style={{fontSize:10.5}}>회사 <span style={{color:'var(--muted-2)', fontWeight:400}}>(선택)</span></label>
+                      <input className="input" value={b.company||''} onChange={e=>updateWishBuyer(i, 'company', e.target.value)} placeholder="A Company"/>
+                    </div>
+                    <div>
+                      <label className="label" style={{fontSize:10.5}}>직함/부서 <span style={{color:'var(--muted-2)', fontWeight:400}}>(선택)</span></label>
+                      <input className="input" value={b.position||''} onChange={e=>updateWishBuyer(i, 'position', e.target.value)} placeholder="Managing Director"/>
+                    </div>
+                    <div>
+                      <label className="label" style={{fontSize:10.5}}>이메일 <span style={{color:'var(--muted-2)', fontWeight:400}}>(선택)</span></label>
+                      <input className="input" value={b.email||''} onChange={e=>updateWishBuyer(i, 'email', e.target.value)} placeholder="buyer@company.com"/>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="label" style={{fontSize:10.5}}>메모 <span style={{color:'var(--muted-2)', fontWeight:400}}>(선택)</span></label>
+                    <textarea className="textarea" rows={2} value={b.memo||''} onChange={e=>updateWishBuyer(i, 'memo', e.target.value)}
+                              placeholder="예) 기존 계약 이력, 협의하고 싶은 내용 등"/>
+                  </div>
+                </div>
+              ))}
+            </div>
+        }
+        <div style={{marginTop:12, display:'flex', justifyContent:'center'}}>
+          <button className="btn btn-ghost" style={{padding:'8px 18px', fontSize:12.5}} onClick={addWishBuyer}><Plus size={13}/>바이어 추가</button>
+        </div>
+      </SurveyQBox>
+      )}
+
+      <SurveyQBox num={9+qOffset+wOffset} icon={<MessageSquare size={14}/>} title="피칭 쇼케이스 및 행사 관련 의견 서술">
         <textarea className="textarea" rows={5} value={form.feedback||''}
                   onChange={e=>updateForm({...form, feedback:e.target.value})}
                   placeholder="요청사항, 특별 준비사항, 기타 협의하실 내용을 자유롭게 기입해주세요."
@@ -7242,6 +7310,8 @@ function SurveyDetail({survey, project}){
   ];
 
   const travelers = s.additionalTravelers || [];
+  const wishBuyers = s.wishBuyers || [];
+  const showWishBuyers = project === 'MIPCOM' || project === 'CANADA';
 
   return (
     <div style={{display:'flex', flexDirection:'column', gap:14}}>
@@ -7270,6 +7340,31 @@ function SurveyDetail({survey, project}){
               ))}
             </div>}
       </div>
+
+      {/* 만나고 싶은 바이어 명단 — MIPCOM·CANADA */}
+      {showWishBuyers && (
+      <div>
+        <div className="label" style={{marginBottom:4}}>만나고 싶은 바이어 명단 ({wishBuyers.length}건)</div>
+        {wishBuyers.length === 0
+          ? <div style={{fontSize:13, color:'var(--muted-2)'}}>없음</div>
+          : <div style={{display:'flex', flexDirection:'column', gap:8}}>
+              {wishBuyers.map((b, i) => (
+                <div key={i} style={{background:'var(--ivory-2)', padding:12, borderRadius:'var(--radius-sm)', fontSize:13}}>
+                  <div style={{display:'flex', gap:8, flexWrap:'wrap', alignItems:'center'}}>
+                    <span className="mono" style={{fontSize:10, color:'var(--muted)'}}>#{String(i+1).padStart(2,'0')}</span>
+                    {b.category && <span style={{padding:'2px 8px', background:'var(--purple-lt)', color:'var(--purple-dk)', borderRadius:3, fontSize:10.5, fontWeight:600}}>{b.category}</span>}
+                    <span style={{fontWeight:600}}>{b.name || '—'}</span>
+                    <span style={{color:'var(--muted)'}}>·</span>
+                    <span>{b.company || '—'}</span>
+                    {b.position && <><span style={{color:'var(--muted)'}}>·</span><span style={{color:'var(--muted)'}}>{b.position}</span></>}
+                    {b.email && <span className="mono" style={{fontSize:11.5, color:'var(--muted)'}}>{b.email}</span>}
+                  </div>
+                  {b.memo && <div style={{marginTop:6, fontSize:12, color:'var(--ink-2)', whiteSpace:'pre-wrap', lineHeight:1.6}}>{b.memo}</div>}
+                </div>
+              ))}
+            </div>}
+      </div>
+      )}
 
       {/* RRN — 기본 마스킹 + 토글 */}
       <div style={{border:'1px solid var(--line)', borderLeft:'3px solid var(--ink)', borderRadius:'var(--radius-sm)', padding:14, background:'var(--paper)'}}>
