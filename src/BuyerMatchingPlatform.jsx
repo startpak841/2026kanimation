@@ -2646,6 +2646,9 @@ function SurveyQBox({num, icon, title, children}){
 function SurveyTab({me, update}){
   // 참가사 프로젝트에 맞는 수요조사 라벨 (MIFA/MIPCOM/CANADA별)
   const labels = getSurveyLabels(me.project);
+  // CANADA는 숙소 정보를 수요조사에서 취합하지 않음 — 문항 제외 + 이후 번호 당김
+  const hideAccommodation = me.project === 'CANADA';
+  const qOffset = hideAccommodation ? -1 : 0;
   // initial을 매 렌더마다 재생성하지 않도록 useMemo로 캐싱
   const initial = useMemo(() => me.survey || {
     needsInterpreter:null, needsPitchDeckTranslation:null, needsCueCard:null,
@@ -2779,6 +2782,7 @@ function SurveyTab({me, update}){
                   style={{lineHeight:1.7}}/>
       </SurveyQBox>
 
+      {!hideAccommodation && (
       <SurveyQBox num={5} icon={<Home size={14}/>} title={`${labels.shortName} 출장 기간 숙소명 및 주소`}>
         <div style={{fontSize:12, color:'var(--muted)', marginBottom:10, lineHeight:1.6}}>
           숙박은 <strong style={{color:'var(--ink-2)', fontWeight:600}}>개별 예약 방식으로 진행되며, 숙박 지원금으로 지급</strong>됩니다.
@@ -2788,20 +2792,21 @@ function SurveyTab({me, update}){
                   onChange={e=>updateForm({...form, accommodation:e.target.value})}
                   placeholder={labels.accommodationPlaceholder}/>
       </SurveyQBox>
+      )}
 
-      <SurveyQBox num={6} icon={<Plane size={14}/>} title={`${labels.shortName} 출장 항공 정보`}>
+      <SurveyQBox num={6+qOffset} icon={<Plane size={14}/>} title={`${labels.shortName} 출장 항공 정보`}>
         <textarea className="textarea" rows={3} value={form.flightInfo||''}
                   onChange={e=>updateForm({...form, flightInfo:e.target.value})}
                   placeholder={labels.flightPlaceholder}/>
       </SurveyQBox>
 
-      <SurveyQBox num={7} icon={<Mail size={14}/>} title="출장자료 우편 수령처 주소">
+      <SurveyQBox num={7+qOffset} icon={<Mail size={14}/>} title="출장자료 우편 수령처 주소">
         <textarea className="textarea" rows={2} value={form.mailAddress||''}
                   onChange={e=>updateForm({...form, mailAddress:e.target.value})}
                   placeholder="출장 전 자료를 발송할 국내 주소입니다. 회사 주소 또는 담당자 수령 가능 주소 (우편번호 포함)"/>
       </SurveyQBox>
 
-      <SurveyQBox num={8} icon={<Users size={14}/>} title="피칭 담당자 외 출장 인원">
+      <SurveyQBox num={8+qOffset} icon={<Users size={14}/>} title="피칭 담당자 외 출장 인원">
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
           <div style={{fontSize:12, color:'var(--muted)'}}>{travelers.length}명 등록됨</div>
           <button className="btn btn-ghost" style={{padding:'6px 12px', fontSize:12}} onClick={addTraveler}><Plus size={12}/>인원 추가</button>
@@ -2869,7 +2874,7 @@ function SurveyTab({me, update}){
         </div>
       </div>
 
-      <SurveyQBox num={9} icon={<MessageSquare size={14}/>} title="피칭 쇼케이스 및 행사 관련 의견 서술">
+      <SurveyQBox num={9+qOffset} icon={<MessageSquare size={14}/>} title="피칭 쇼케이스 및 행사 관련 의견 서술">
         <textarea className="textarea" rows={5} value={form.feedback||''}
                   onChange={e=>updateForm({...form, feedback:e.target.value})}
                   placeholder="요청사항, 특별 준비사항, 기타 협의하실 내용을 자유롭게 기입해주세요."
@@ -7223,7 +7228,8 @@ function SurveyDetail({survey, project}){
     {label:'피칭덱 번역 지원 필요 여부', value: s.needsPitchDeckTranslation ? (s.needsPitchDeckTranslation==='O' ? '필요 (Yes)' : '불필요 (No)') : null},
     {label:'큐카드 제작 희망 여부', value: s.needsCueCard ? (s.needsCueCard==='O' ? '희망 (Yes)' : '불희망 (No)') : null},
     {label:'모더레이터 소개 멘트 (영문)', value: s.moderatorIntroEn, multi:true},
-    {label:`숙소 정보 (${labels.city})`, value: s.accommodation, multi:true},
+    // CANADA는 숙소 정보를 취합하지 않으므로 상세 화면에서도 제외
+    ...(project === 'CANADA' ? [] : [{label:`숙소 정보 (${labels.city})`, value: s.accommodation, multi:true}]),
     {label:`항공 정보 (ICN ↔ ${labels.airport})`, value: s.flightInfo, multi:true},
     {label:'우편 수령처', value: s.mailAddress, multi:true},
     {label:'여행자 보험 일정 (인천 출발일 → 인천 도착일)',
