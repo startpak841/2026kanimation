@@ -2720,9 +2720,9 @@ function SurveyTab({me, update}){
         </div>
       </div>
 
-      <SurveyQBox num={1} icon={<Languages size={14}/>} title={`${labels.shortName} 기간 동안 현장 통역 필요 여부`}>
+      <SurveyQBox num={1} icon={<Languages size={14}/>} title={`${me.project==='CANADA' ? '행사' : labels.shortName} 기간 동안 현장 통역 필요 여부`}>
         <div style={{fontSize:12, color:'var(--muted)', marginBottom:10, lineHeight:1.6}}>
-          {labels.shortName} 행사 기간 동안 비즈니스 미팅·피칭 쇼케이스 등 현장에서 한↔영(또는 한↔불) 통역 지원이 필요한지 선택해주세요.
+          {me.project==='CANADA' ? '행사' : `${labels.shortName} 행사`} 기간 동안 비즈니스 미팅·피칭 쇼케이스 등 현장에서 한↔영(또는 한↔불) 통역 지원이 필요한지 선택해주세요.
         </div>
         <div style={{display:'flex', gap:8}}>
           {[
