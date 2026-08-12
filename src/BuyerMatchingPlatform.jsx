@@ -490,7 +490,7 @@ const EVENT_CONFIG = {
     slotMinutes: 30,
   },
   CANADA: {
-    label: 'Canada Event 2026',
+    label: '2026 K-Animation Global Showcase in Canada',
     // 일자별 운영시간이 다른 행사 — date 항목의 timeStart/timeEnd가 있으면 그것이 우선 적용됨
     dates: [
       { date: '2026-11-03', dow: '화 · Tue', timeStart: '13:30', timeEnd: '18:00' },
@@ -508,6 +508,7 @@ const SURVEY_LABELS = {
     shortName: 'MIFA',
     fullName: 'MIFA Annecy 2026',
     city: 'Annecy',
+    country: 'France',
     airport: 'CDG',
     airportCity: 'Paris (Charles de Gaulle)',
     dateRange: '2026-06-23 ~ 2026-06-26',
@@ -518,6 +519,7 @@ const SURVEY_LABELS = {
     shortName: 'MIPCOM',
     fullName: 'MIPCOM Cannes 2026',
     city: 'Cannes',
+    country: 'France',
     airport: 'NCE',
     airportCity: 'Nice Côte d\'Azur',
     dateRange: '2026-10-12 ~ 2026-10-15',
@@ -526,11 +528,12 @@ const SURVEY_LABELS = {
   },
   CANADA: {
     shortName: 'CANADA',
-    fullName: 'Canada Event 2026',
+    fullName: '2026 K-Animation Global Showcase in Canada',
     city: 'Toronto',
+    country: 'Canada',
     airport: 'YYZ',
     airportCity: 'Toronto Pearson',
-    dateRange: '',
+    dateRange: '2026-11-03 ~ 2026-11-04',
     accommodationPlaceholder: '호텔명, 주소, 체크인 / 체크아웃 일자를 기입해주세요.',
     flightPlaceholder: '출국·입국 편명과 일시. 예) 출국 KE073 ICN → YYZ / 입국 KE074 YYZ → ICN',
   },
@@ -2711,7 +2714,7 @@ function SurveyTab({me, update}){
         <div style={{flex:1, minWidth:0}}>
           <div style={{fontSize:13.5, fontWeight:600, color:'var(--ink)'}}>{labels.fullName}</div>
           <div style={{fontSize:11.5, color:'var(--muted)', marginTop:2}}>
-            📅 {labels.dateRange || '일정 미확정'} · 📍 {labels.city}, France
+            📅 {labels.dateRange || '일정 미확정'} · 📍 {labels.city}, {labels.country}
             {labels.airport && ` · ✈️ ${labels.airportCity} (${labels.airport})`}
           </div>
         </div>
