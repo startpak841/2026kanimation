@@ -238,6 +238,28 @@ function displayFormats(ip){
   });
 }
 
+// IP Genres 표시값 — 다중 장르 배열 (레거시 단일 genre 호환, Others 선택 시 custom 값 결합)
+function displayGenres(ip){
+  if (!ip) return [];
+  const arr = Array.isArray(ip.genres) && ip.genres.length > 0
+    ? ip.genres
+    : (ip.genre ? [ip.genre] : []);
+  return arr.map(g => {
+    const mg = migrateGenre(g);
+    if (mg === 'Others' && ip.genreCustom) return `Others · ${ip.genreCustom}`;
+    return mg;
+  });
+}
+
+// IP Target Ages 표시값 — 다중 타겟 연령 배열 (레거시 단일 targetAge 호환)
+function displayTargetAges(ip){
+  if (!ip) return [];
+  const arr = Array.isArray(ip.targetAges) && ip.targetAges.length > 0
+    ? ip.targetAges
+    : (ip.targetAge ? [ip.targetAge] : []);
+  return arr.map(migrateTargetAge);
+}
+
 // ============================ DOMAIN CONSTANTS ============================
 const BUYER_CATEGORIES = [
   'Broadcaster (방송사)',
@@ -1020,17 +1042,20 @@ function ipBuyerMatchScore(ip, buyer) {
     }
   }
 
-  // [C] 장르 — IP 단일값(또는 한국어 레거시) vs 바이어 다중값
+  // [C] 장르 — IP 다중값(genres 우선, 없으면 genre 단일값) vs 바이어 다중값
   let scoreC = 0;
   const buyerGenres = getBuyerGenres(buyer);
-  const ipGenre = migrateGenre(ip.genre);
-  if (ipGenre && buyerGenres.length > 0) {
-    if (buyerGenres.includes(ipGenre)) {
-      scoreC += 10;
+  const ipGenres = Array.isArray(ip.genres) && ip.genres.length > 0
+    ? ip.genres.map(migrateGenre)
+    : (ip.genre ? [migrateGenre(ip.genre)] : []);
+  if (ipGenres.length > 0 && buyerGenres.length > 0) {
+    const matchedGenres = ipGenres.filter(g => buyerGenres.includes(g));
+    if (matchedGenres.length > 0) {
+      scoreC += 10;  // 1개라도 매칭되면 +10 (다중 매칭도 단일 점수)
       detail.genre = true;
       detail.genreScore = 10;
-      detail.genreMatches = [ipGenre];
-      reasons.push(`장르 일치 · ${ipGenre} (+10)`);
+      detail.genreMatches = matchedGenres;
+      reasons.push(`장르 일치 · ${matchedGenres.join(', ')} (+10)`);
     }
   }
 
@@ -1051,17 +1076,20 @@ function ipBuyerMatchScore(ip, buyer) {
     }
   }
 
-  // [E] 타겟 연령 — IP 단일값 vs 바이어 다중값
+  // [E] 타겟 연령 — IP 다중값(targetAges 우선, 없으면 targetAge 단일값) vs 바이어 다중값
   let scoreE = 0;
   const buyerTargetAges = getBuyerTargetAges(buyer);
-  const ipTargetAge = migrateTargetAge(ip.targetAge);
-  if (ipTargetAge && buyerTargetAges.length > 0) {
-    if (buyerTargetAges.includes(ipTargetAge)) {
-      scoreE += 10;
+  const ipTargetAges = Array.isArray(ip.targetAges) && ip.targetAges.length > 0
+    ? ip.targetAges.map(migrateTargetAge)
+    : (ip.targetAge ? [migrateTargetAge(ip.targetAge)] : []);
+  if (ipTargetAges.length > 0 && buyerTargetAges.length > 0) {
+    const matchedTargetAges = ipTargetAges.filter(t => buyerTargetAges.includes(t));
+    if (matchedTargetAges.length > 0) {
+      scoreE += 10;  // 1개라도 매칭되면 +10 (다중 매칭도 단일 점수)
       detail.targetAge = true;
       detail.targetAgeScore = 10;
-      detail.targetAgeMatches = [ipTargetAge];
-      reasons.push(`타겟 연령 일치 · ${ipTargetAge} (+10)`);
+      detail.targetAgeMatches = matchedTargetAges;
+      reasons.push(`타겟 연령 일치 · ${matchedTargetAges.join(', ')} (+10)`);
     }
   }
 
@@ -2222,8 +2250,8 @@ function IPsTab({me, update}){
     const id = 'IP-' + Date.now();
     setForm({
       id, name:'', nameEn:'', introEn:'',
-      genre:'', genreCustom:'',
-      targetAge:'',
+      genre:'', genres:[], genreCustom:'',
+      targetAge:'', targetAges:[],
       format:'', formats:[], formatCustom:'',
       desiredBuyerPriority:['','','',''],
       regions:[],
@@ -2236,12 +2264,22 @@ function IPsTab({me, update}){
     const formatsArr = Array.isArray(ip.formats)
       ? ip.formats.map(migrateFormat)
       : (ip.format ? [migrateFormat(ip.format)] : []);
+    // genres 배열 초기화 — 단일 genre 필드(레거시)도 자동 변환
+    const genresArr = Array.isArray(ip.genres) && ip.genres.length > 0
+      ? ip.genres.map(migrateGenre)
+      : (ip.genre ? [migrateGenre(ip.genre)] : []);
+    // targetAges 배열 초기화 — 단일 targetAge 필드(레거시)도 자동 변환
+    const targetAgesArr = Array.isArray(ip.targetAges) && ip.targetAges.length > 0
+      ? ip.targetAges.map(migrateTargetAge)
+      : (ip.targetAge ? [migrateTargetAge(ip.targetAge)] : []);
     setForm({
       ...ip,
       // 기존 한국어 값이 들어있으면 영어로 자동 변환 (옵션 변경 마이그레이션)
-      genre: migrateGenre(ip.genre),
+      genre: genresArr[0] || '',              // 단일 호환 필드 (레거시 fallback)
+      genres: genresArr,                       // 다중 장르 배열
       genreCustom: ip.genreCustom || '',
-      targetAge: migrateTargetAge(ip.targetAge),
+      targetAge: targetAgesArr[0] || '',      // 단일 호환 필드 (레거시 fallback)
+      targetAges: targetAgesArr,               // 다중 타겟 연령 배열
       format: formatsArr[0] || '',           // 단일 호환 필드 (매칭 엔진 fallback)
       formats: formatsArr,                    // 다중 포맷 배열
       formatCustom: ip.formatCustom || '',
@@ -2344,9 +2382,9 @@ function IPsTab({me, update}){
                   {ip.nameEn && <div style={{fontSize:14, color:'var(--muted)', fontStyle:'normal'}}>/ {ip.nameEn}</div>}
                 </div>
                 <div style={{display:'flex', gap:6, flexWrap:'wrap', marginTop:12}}>
-                  {displayGenre(ip) && <span className="chip">{displayGenre(ip)}</span>}
-                  {displayFormats(ip).map((f,i) => <span key={i} className="chip">{f}</span>)}
-                  {ip.targetAge && <span className="chip">{migrateTargetAge(ip.targetAge)}</span>}
+                  {displayGenres(ip).map((g,i) => <span key={'g'+i} className="chip">{g}</span>)}
+                  {displayFormats(ip).map((f,i) => <span key={'f'+i} className="chip">{f}</span>)}
+                  {displayTargetAges(ip).map((t,i) => <span key={'t'+i} className="chip">{t}</span>)}
                   {formatRuntimeSummary(ip).map((s,i) => <span key={i} className="chip" style={{background:'var(--paper)', borderColor:'var(--line)'}}>{s}</span>)}
                 </div>
               </div>
@@ -2463,26 +2501,72 @@ function IPsTab({me, update}){
                 글로벌 바이어 배포용 프로그램북에 그대로 노출됩니다.
               </div>
             </div>
-            <div>
-              <label className="label">Genre</label>
-              <select className="select" value={form.genre||''} onChange={e=>setForm({...form, genre:e.target.value, genreCustom: e.target.value === 'Others' ? (form.genreCustom||'') : ''})}>
-                <option value="">Select genre</option>
-                {GENRE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
-              </select>
-              {form.genre === 'Others' && (
+            <div style={{gridColumn:'1 / -1'}}>
+              <label className="label">
+                Genre <span style={{color:'var(--muted)', fontWeight:400, marginLeft:6}}>(multiple selection)</span>
+              </label>
+              <div style={{display:'flex', flexWrap:'wrap', gap:6}}>
+                {GENRE_OPTIONS.map(g => {
+                  const genres = Array.isArray(form.genres) ? form.genres : (form.genre ? [form.genre] : []);
+                  const selected = genres.includes(g);
+                  return (
+                    <button key={g} type="button"
+                      onClick={()=>{
+                        const cur = Array.isArray(form.genres) ? [...form.genres] : (form.genre ? [form.genre] : []);
+                        const next = selected ? cur.filter(x => x !== g) : [...cur, g];
+                        // Others 해제 시 genreCustom도 비움
+                        const newGenreCustom = next.includes('Others') ? (form.genreCustom||'') : '';
+                        setForm({...form, genres: next, genre: next[0] || '', genreCustom: newGenreCustom});
+                      }}
+                      style={{
+                        padding:'7px 14px', borderRadius:999, cursor:'pointer',
+                        border: selected ? '1px solid var(--purple)' : '1px solid var(--line)',
+                        background: selected ? 'var(--purple)' : 'var(--paper)',
+                        color: selected ? '#fff' : 'var(--ink-2)',
+                        fontSize:12.5, fontWeight:600, fontFamily:'inherit',
+                        transition:'all .15s',
+                      }}>
+                      {g}
+                    </button>
+                  );
+                })}
+              </div>
+              {(Array.isArray(form.genres) ? form.genres : []).includes('Others') && (
                 <input className="input"
-                  style={{marginTop:6}}
+                  style={{marginTop:8}}
                   value={form.genreCustom||''}
                   onChange={e=>setForm({...form, genreCustom: e.target.value})}
-                  placeholder="Please specify the genre (e.g., Mystery, Documentary)"/>
+                  placeholder="Please specify other genre(s) — separate multiple with comma (e.g., Mystery, Documentary)"/>
               )}
             </div>
-            <div>
-              <label className="label">Target Age</label>
-              <select className="select" value={form.targetAge||''} onChange={e=>setForm({...form, targetAge:e.target.value})}>
-                <option value="">Select target age</option>
-                {TARGET_AGE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
-              </select>
+            <div style={{gridColumn:'1 / -1'}}>
+              <label className="label">
+                Target Age <span style={{color:'var(--muted)', fontWeight:400, marginLeft:6}}>(multiple selection)</span>
+              </label>
+              <div style={{display:'flex', flexWrap:'wrap', gap:6}}>
+                {TARGET_AGE_OPTIONS.map(t => {
+                  const ages = Array.isArray(form.targetAges) ? form.targetAges : (form.targetAge ? [form.targetAge] : []);
+                  const selected = ages.includes(t);
+                  return (
+                    <button key={t} type="button"
+                      onClick={()=>{
+                        const cur = Array.isArray(form.targetAges) ? [...form.targetAges] : (form.targetAge ? [form.targetAge] : []);
+                        const next = selected ? cur.filter(x => x !== t) : [...cur, t];
+                        setForm({...form, targetAges: next, targetAge: next[0] || ''});
+                      }}
+                      style={{
+                        padding:'7px 14px', borderRadius:999, cursor:'pointer',
+                        border: selected ? '1px solid var(--purple)' : '1px solid var(--line)',
+                        background: selected ? 'var(--purple)' : 'var(--paper)',
+                        color: selected ? '#fff' : 'var(--ink-2)',
+                        fontSize:12.5, fontWeight:600, fontFamily:'inherit',
+                        transition:'all .15s',
+                      }}>
+                      {t}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <div style={{gridColumn:'1 / -1'}}>
               <label className="label">
@@ -5811,9 +5895,9 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                               #{idx+1} {ip.name || '(제목 미입력)'}
                             </div>
                             <div style={{display:'flex', flexWrap:'wrap', gap:3}}>
-                              {displayGenre(ip) && <span style={{fontSize:9.5, padding:'1px 6px', background:'var(--ivory-2)', borderRadius:3, color:'var(--ink-2)', fontWeight:500}}>{displayGenre(ip)}</span>}
-                              {displayFormats(ip).map((f,i) => <span key={i} style={{fontSize:9.5, padding:'1px 6px', background:'var(--ivory-2)', borderRadius:3, color:'var(--ink-2)', fontWeight:500}}>{f}</span>)}
-                              {ip.targetAge && <span style={{fontSize:9.5, padding:'1px 6px', background:'var(--ivory-2)', borderRadius:3, color:'var(--ink-2)', fontWeight:500}}>{migrateTargetAge(ip.targetAge)}</span>}
+                              {displayGenres(ip).map((g,i) => <span key={'g'+i} style={{fontSize:9.5, padding:'1px 6px', background:'var(--ivory-2)', borderRadius:3, color:'var(--ink-2)', fontWeight:500}}>{g}</span>)}
+                              {displayFormats(ip).map((f,i) => <span key={'f'+i} style={{fontSize:9.5, padding:'1px 6px', background:'var(--ivory-2)', borderRadius:3, color:'var(--ink-2)', fontWeight:500}}>{f}</span>)}
+                              {displayTargetAges(ip).map((t,i) => <span key={'t'+i} style={{fontSize:9.5, padding:'1px 6px', background:'var(--ivory-2)', borderRadius:3, color:'var(--ink-2)', fontWeight:500}}>{t}</span>)}
                               {(ip.regions || []).slice(0, 3).map(r => {
                                 const rg = REGIONS.find(x => x.key === r);
                                 const lbl = rg?.label?.split(' · ')[0] || r;
@@ -6118,9 +6202,9 @@ function IpMatrixCard({ip, ipIndex, buyers, hasMeeting, selectedCell, setSelecte
             {ip.nameEn && <div style={{fontSize:12.5, color:'var(--muted)'}}>{ip.nameEn}</div>}
             {/* 메타 칩 */}
             <div style={{display:'flex', gap:5, flexWrap:'wrap', marginTop:10}}>
-              {displayGenre(ip) && <span className="chip" style={{background:'var(--paper)'}}>{displayGenre(ip)}</span>}
-              {displayFormats(ip).map((f,i) => <span key={i} className="chip" style={{background:'var(--paper)'}}>{f}</span>)}
-              {ip.targetAge && <span className="chip" style={{background:'var(--paper)'}}>{migrateTargetAge(ip.targetAge)}</span>}
+              {displayGenres(ip).map((g,i) => <span key={'g'+i} className="chip" style={{background:'var(--paper)'}}>{g}</span>)}
+              {displayFormats(ip).map((f,i) => <span key={'f'+i} className="chip" style={{background:'var(--paper)'}}>{f}</span>)}
+              {displayTargetAges(ip).map((t,i) => <span key={'t'+i} className="chip" style={{background:'var(--paper)'}}>{t}</span>)}
               {(ip.regions || []).slice(0,3).map(r => {
                 const reg = REGIONS.find(x => x.key === r);
                 const ww = r === 'WW';
@@ -6749,8 +6833,8 @@ function ExhibitorDetailModal({exhibitor, onClose, onEdit, readOnly}){
         introEn: e.introEn,
         ips: (e.ips || []).map(ip => ({
           id: ip.id, name: ip.name, nameEn: ip.nameEn,
-          genre: ip.genre, genreCustom: ip.genreCustom,
-          targetAge: ip.targetAge,
+          genre: ip.genre, genres: ip.genres, genreCustom: ip.genreCustom,
+          targetAge: ip.targetAge, targetAges: ip.targetAges,
           format: ip.format, formats: ip.formats, formatCustom: ip.formatCustom,
           episodes: ip.episodes, seasons: ip.seasons,
           runtimeMin: ip.runtimeMin, runtimeSec: ip.runtimeSec,
@@ -7190,9 +7274,9 @@ function IPDetailBlock({ip, idx, exhibitor, readOnly}){
           {ip.nameEn && <div style={{fontSize:12.5, color:'var(--muted)', marginTop:1}}>{ip.nameEn}</div>}
         </div>
         <div style={{display:'flex', gap:5, flexWrap:'wrap'}}>
-          {displayGenre(ip) && <span className="chip">{displayGenre(ip)}</span>}
-          {displayFormats(ip).map((f,i) => <span key={i} className="chip">{f}</span>)}
-          {ip.targetAge && <span className="chip">{migrateTargetAge(ip.targetAge)}</span>}
+          {displayGenres(ip).map((g,i) => <span key={'g'+i} className="chip">{g}</span>)}
+          {displayFormats(ip).map((f,i) => <span key={'f'+i} className="chip">{f}</span>)}
+          {displayTargetAges(ip).map((t,i) => <span key={'t'+i} className="chip">{t}</span>)}
           {formatRuntimeSummary(ip).map((s,i) => <span key={i} className="chip" style={{background:'var(--paper)', borderColor:'var(--line)'}}>{s}</span>)}
         </div>
       </div>
