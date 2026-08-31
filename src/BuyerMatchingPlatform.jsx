@@ -94,6 +94,159 @@ async function saveState(state) {
   } catch (e) { console.error('Save failed', e); }
 }
 
+// ============================ CHANGE LOG (변경 이력) ============================
+// 참가사 정보가 수정될 때 "이전값 → 현재값 / 시각 / 섹션"을 자동 기록.
+// 모든 상태 변경이 update(fn) 한 곳을 지나므로, 여기서 prev↔next를 비교해
+// 바뀐 참가사·필드만 추출하여 state.changeLogs[]에 append 한다.
+// - 저장 위치: 같은 app_state JSONB 안 (별도 테이블 불필요)
+// - 이미지: base64는 저장하지 않고 "장수 변화 + 교체 여부"만 기록 (용량 보호)
+// - 보관 정책: 무제한 전수 보관 (행사 종료 후 수동 정리 전제)
+
+// 필드 → 한글 라벨. 참가사 프로필/소개 필드
+const CL_FIELD_LABELS = {
+  companyName: '회사명(국문)', companyNameEn: '회사명(영문)',
+  contactName: '담당자(국문)', contactNameEn: '담당자(영문)',
+  positionKo: '직함(국문)', positionEn: '직함(영문)',
+  email: '이메일', phone: '연락처', introEn: '회사소개(영문)',
+  logoKey: '로고 이미지', keyVisualKey: '키비주얼 이미지',
+};
+// IP 필드 라벨
+const CL_IP_FIELD_LABELS = {
+  name: 'IP명(국문)', nameEn: 'IP명(영문)', introEn: 'IP소개글(영문)',
+  genre: '장르', genres: '장르', genreCustom: '장르(기타)',
+  targetAge: '타깃연령', targetAges: '타깃연령',
+  format: '포맷', formats: '포맷', formatCustom: '포맷(기타)',
+  episodes: '에피소드수', seasons: '시즌수', runtimeMin: '러닝타임(분)', runtimeSec: '러닝타임(초)',
+  desiredBuyerPriority: '희망바이어 우선순위', desiredBuyerPriorityOther: '희망바이어(기타)',
+  regions: '희망지역',
+};
+// 수요조사(survey) 필드 라벨
+const CL_SURVEY_FIELD_LABELS = {
+  needsInterpreter: '통역 필요', moderatorIntroEn: '모더레이터 소개(영문)',
+  accommodation: '숙소', flightInfo: '항공정보', mailAddress: '우편주소',
+  additionalTravelers: '동반 탑승자', pitcherRRN: '피처 주민번호',
+  feedback: '피드백', wishBuyers: '희망 바이어',
+};
+
+// 값을 사람이 읽을 수 있는 짧은 문자열로 정규화
+function clFmt(v) {
+  if (v === undefined || v === null || v === '') return '(빈 값)';
+  if (Array.isArray(v)) {
+    if (v.length === 0) return '(없음)';
+    // 객체 배열(동반탑승자 등)은 개수로 요약
+    if (typeof v[0] === 'object') return `${v.length}개 항목`;
+    return v.join(', ');
+  }
+  if (typeof v === 'object') return JSON.stringify(v);
+  if (typeof v === 'boolean') return v ? '예' : '아니오';
+  const s = String(v);
+  return s.length > 120 ? s.slice(0, 120) + '…' : s;
+}
+
+// 두 값이 실질적으로 같은지 (배열·객체 포함)
+function clEqual(a, b) {
+  if (a === b) return true;
+  if (a == null && b == null) return true;
+  if ((a == null) !== (b == null)) return false;
+  if (typeof a === 'object' || typeof b === 'object') {
+    try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
+  }
+  return false;
+}
+
+// 한 참가사(before/after)를 비교해 로그 엔트리 배열 반환
+function clDiffExhibitor(before, after) {
+  const ts = new Date().toISOString();
+  const base = {
+    ts,
+    exhibitorId: after.id,
+    company: after.companyName || after.companyNameEn || after.id,
+    project: after.project || '',
+    actor: '참가사',
+  };
+  const out = [];
+
+  // 1) 프로필/소개 최상위 필드
+  for (const [key, label] of Object.entries(CL_FIELD_LABELS)) {
+    if (key === 'logoKey' || key === 'keyVisualKey') {
+      // 이미지 키: 교체 여부만 기록
+      const bHas = !!before[key], aHas = !!after[key];
+      if (before[key] !== after[key]) {
+        out.push({ ...base, section: '회사정보', field: key, label,
+          before: bHas ? '등록됨' : '(없음)', after: aHas ? (bHas ? '교체됨' : '등록됨') : '삭제됨' });
+      }
+      continue;
+    }
+    if (!clEqual(before[key], after[key])) {
+      out.push({ ...base, section: key === 'introEn' ? '회사소개' : '회사정보',
+        field: key, label, before: clFmt(before[key]), after: clFmt(after[key]) });
+    }
+  }
+
+  // 2) survey
+  const bs = before.survey || {}, as = after.survey || {};
+  const surveyKeys = new Set([...Object.keys(bs), ...Object.keys(as)]);
+  for (const key of surveyKeys) {
+    if (!clEqual(bs[key], as[key])) {
+      const label = CL_SURVEY_FIELD_LABELS[key] || key;
+      out.push({ ...base, section: '수요조사', field: key, label,
+        before: clFmt(bs[key]), after: clFmt(as[key]) });
+    }
+  }
+
+  // 3) IP — id 기준 매칭. 추가/삭제/필드변경/이미지 장수변경
+  const bIps = before.ips || [], aIps = after.ips || [];
+  const bMap = new Map(bIps.map(ip => [ip.id, ip]));
+  const aMap = new Map(aIps.map(ip => [ip.id, ip]));
+  // 삭제된 IP
+  for (const ip of bIps) {
+    if (!aMap.has(ip.id)) {
+      out.push({ ...base, section: 'IP', field: 'ip_removed', label: 'IP 삭제',
+        before: ip.nameEn || ip.name || ip.id, after: '(삭제됨)' });
+    }
+  }
+  for (const aip of aIps) {
+    const bip = bMap.get(aip.id);
+    const ipName = aip.nameEn || aip.name || aip.id;
+    if (!bip) {
+      out.push({ ...base, section: 'IP', field: 'ip_added', label: 'IP 추가',
+        before: '(없음)', after: ipName });
+      continue;
+    }
+    // 텍스트 필드 비교
+    for (const [key, label] of Object.entries(CL_IP_FIELD_LABELS)) {
+      if (!clEqual(bip[key], aip[key])) {
+        out.push({ ...base, section: 'IP', field: key, label: `[${ipName}] ${label}`,
+          before: clFmt(bip[key]), after: clFmt(aip[key]) });
+      }
+    }
+    // 이미지: 장수 변화만 (base64 미저장)
+    const bImg = (bip.images || []).length, aImg = (aip.images || []).length;
+    if (bImg !== aImg) {
+      out.push({ ...base, section: 'IP', field: 'ip_images', label: `[${ipName}] 이미지`,
+        before: `${bImg}장`, after: `${aImg}장${aImg > bImg ? ' (추가)' : ' (삭제/교체)'}` });
+    }
+  }
+
+  return out;
+}
+
+// prev/next state 전체를 비교해 모든 참가사 변경 로그를 뽑아 next에 append한 state 반환
+function clApply(prev, next) {
+  if (!prev || !next || !Array.isArray(next.exhibitors)) return next;
+  const prevMap = new Map((prev.exhibitors || []).map(e => [e.id, e]));
+  let entries = [];
+  for (const after of next.exhibitors) {
+    const before = prevMap.get(after.id);
+    if (!before) continue; // 신규 참가사 생성은 로그 대상 아님
+    // updatedAt만 바뀌고 실제 내용 동일한 경우를 걸러내기 위해 diff 결과로만 판단
+    entries = entries.concat(clDiffExhibitor(before, after));
+  }
+  if (entries.length === 0) return next;
+  const existing = Array.isArray(next.changeLogs) ? next.changeLogs : [];
+  return { ...next, changeLogs: [...existing, ...entries] };
+}
+
 // ============================ IMAGE / BLOB STORAGE ============================
 // 이미지는 state JSON과 분리 저장: 각 이미지는 고유 storage key에 base64 저장
 // window.storage는 value당 5MB 제한이 있어, 큰 파일은 청크 분할 저장:
@@ -1628,7 +1781,8 @@ export default function BuyerMatchingPlatform() {
 
   const update = (fn) => {
     setState(prev => {
-      const next = fn(prev);
+      const rawNext = fn(prev);
+      const next = clApply(prev, rawNext);  // 참가사 변경분 자동 로그 기록
       saveState(next);
       return next;
     });
@@ -5037,6 +5191,7 @@ function ExhibitorsTab({state, update, readOnly}){
       {detail && (
         <ExhibitorDetailModal
           exhibitor={detail}
+          changeLogs={state?.changeLogs || []}
           onClose={()=>setDetailId(null)}
           onEdit={readOnly ? null : () => { setEditId(detail.id); setDetailId(null); }}
           readOnly={readOnly}
@@ -6754,8 +6909,11 @@ function IPImageUploader({form, setForm}){
 // ADMIN — EXHIBITOR DETAIL MODAL
 // ============================================================================
 
-function ExhibitorDetailModal({exhibitor, onClose, onEdit, readOnly}){
+function ExhibitorDetailModal({exhibitor, changeLogs, onClose, onEdit, readOnly}){
   const e = exhibitor;
+  const [showLog, setShowLog] = useState(false);
+  // 이 참가사의 변경 이력만 최신순 추출
+  const myLogs = (changeLogs || []).filter(l => l.exhibitorId === e.id).slice().reverse();
   const [logo, setLogo] = useState(null);
   const [keyVisual, setKeyVisual] = useState(null);
   const [downloading, setDownloading] = useState(false);
@@ -6923,6 +7081,54 @@ function ExhibitorDetailModal({exhibitor, onClose, onEdit, readOnly}){
               <span style={{marginLeft:'auto', fontSize:10.5, color:'var(--muted-2)', display:'inline-flex', alignItems:'center', gap:4}}>
                 <Clock size={10}/>최근 업데이트 {formatSectionTime(e.updatedAt)}
               </span>
+            )}
+          </div>
+
+          {/* 변경 이력 타임라인 (관리자 전용) */}
+          <div style={{marginTop:12}}>
+            <button
+              onClick={()=>setShowLog(v=>!v)}
+              style={{
+                display:'inline-flex', alignItems:'center', gap:6, cursor:'pointer',
+                background:'none', border:'none', padding:'4px 0', fontFamily:'inherit',
+                fontSize:11.5, fontWeight:600, color: myLogs.length ? 'var(--ink)' : 'var(--muted-2)',
+              }}>
+              <Clock size={12}/>
+              변경 이력 {myLogs.length > 0 ? `(${myLogs.length}건)` : '(없음)'}
+              {myLogs.length > 0 && <span style={{fontSize:10, color:'var(--muted-2)'}}>{showLog ? '접기 ▲' : '펼치기 ▼'}</span>}
+            </button>
+            {showLog && myLogs.length > 0 && (
+              <div style={{
+                marginTop:8, maxHeight:280, overflowY:'auto',
+                border:'1px solid var(--line)', borderRadius:'var(--radius)',
+                background:'var(--ivory-2)', padding:'8px 4px',
+              }}>
+                {myLogs.map((l, i) => (
+                  <div key={i} style={{
+                    display:'grid', gridTemplateColumns:'92px 1fr', gap:10,
+                    padding:'7px 12px', borderBottom: i < myLogs.length-1 ? '1px solid var(--line)' : 'none',
+                    fontSize:11.5, alignItems:'start',
+                  }}>
+                    <div style={{color:'var(--muted-2)', fontSize:10.5, lineHeight:1.4}}>
+                      {new Date(l.ts).toLocaleString('ko-KR', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'})}
+                    </div>
+                    <div>
+                      <div style={{display:'inline-flex', alignItems:'center', gap:6, marginBottom:3}}>
+                        <span style={{
+                          fontSize:9.5, fontWeight:700, padding:'1px 6px', borderRadius:99,
+                          background:'var(--ivory)', border:'1px solid var(--line)', color:'var(--muted)',
+                        }}>{l.section}</span>
+                        <span style={{fontWeight:600}}>{l.label}</span>
+                      </div>
+                      <div style={{color:'var(--muted)', lineHeight:1.5, wordBreak:'break-word'}}>
+                        <span style={{textDecoration:'line-through', color:'var(--muted-2)'}}>{l.before}</span>
+                        <span style={{margin:'0 6px', color:'var(--ink)'}}>→</span>
+                        <span style={{color:'var(--ink)', fontWeight:500}}>{l.after}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>
