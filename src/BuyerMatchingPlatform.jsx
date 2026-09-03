@@ -267,6 +267,27 @@ function fileToBase64(file) {
   });
 }
 
+// 청크 1개를 저장하고, 즉시 되읽어(read-back) 실제 저장을 검증. 최대 3회 재시도.
+async function setChunkVerified(chunkKey, chunkValue, attempts = 3) {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await window.storage.set(chunkKey, chunkValue);
+      if (res) {
+        // read-back: 실제로 온전히 저장됐는지 길이까지 대조
+        const back = await window.storage.get(chunkKey);
+        if (back && typeof back.value === 'string' && back.value.length === chunkValue.length) {
+          return true; // 검증 통과
+        }
+      }
+    } catch (e) {
+      // 다음 시도로
+    }
+    // 재시도 전 짧은 대기 (일시적 부하/네트워크 완화)
+    if (attempt < attempts) await new Promise(r => setTimeout(r, 400 * attempt));
+  }
+  return false; // 모든 시도 실패
+}
+
 async function saveBlob(key, file, onProgress) {
   const data = await fileToBase64(file);
   // 청크 분할
@@ -277,12 +298,31 @@ async function saveBlob(key, file, onProgress) {
   const meta = { name: file.name, type: file.type, size: file.size, chunks: chunks.length };
   // 기존에 같은 key의 청크가 남아있을 수 있으니 먼저 정리
   await deleteBlob(key).catch(()=>{});
-  // 메타 저장
-  await window.storage.set(key, JSON.stringify(meta));
-  // 청크 순차 저장 (동시성을 낮춰 storage 부하 관리)
+
+  // ── 유실 방지: 청크(본체)를 먼저 검증 저장하고, 전부 성공한 뒤에야 메타를 확정 ──
+  // 메타가 먼저 저장되고 청크가 유실되면 "등록됨처럼 보이나 실제로는 깨진" 상태가 되므로,
+  // 순서를 뒤집어 본체 저장 성공을 메타 커밋의 전제 조건으로 삼는다.
   for (let i = 0; i < chunks.length; i++) {
-    await window.storage.set(`${key}:chunk:${i}`, chunks[i]);
+    const ok = await setChunkVerified(`${key}:chunk:${i}`, chunks[i]);
+    if (!ok) {
+      // 실패 시 이미 올라간 조각까지 정리해 반쪽 데이터를 남기지 않음
+      await deleteBlob(key).catch(()=>{});
+      throw new Error(`이미지 저장 실패: 데이터 조각(${i + 1}/${chunks.length})을 저장하지 못했습니다. 파일 용량을 확인하고 다시 시도해 주세요.`);
+    }
     onProgress && onProgress(i + 1, chunks.length);
+  }
+  // 모든 청크 검증 통과 후에만 메타 확정 저장(+검증)
+  const metaStr = JSON.stringify(meta);
+  const metaRes = await window.storage.set(key, metaStr);
+  if (!metaRes) {
+    await deleteBlob(key).catch(()=>{});
+    throw new Error('이미지 저장 실패: 메타데이터를 저장하지 못했습니다. 다시 시도해 주세요.');
+  }
+  // 최종 무결성 확인: loadBlob로 전체 재조합이 되는지 검증
+  const verify = await loadBlob(key);
+  if (!verify || !verify.data) {
+    await deleteBlob(key).catch(()=>{});
+    throw new Error('이미지 저장 검증 실패: 저장 직후 재확인에서 데이터를 읽지 못했습니다. 다시 시도해 주세요.');
   }
   return { ...meta, data };
 }
@@ -2925,7 +2965,7 @@ function SurveyTab({me, update}){
   };
 
   const travelers = form.additionalTravelers || [];
-  const addTraveler    = () => updateForm({...form, additionalTravelers: [...travelers, {name:'', position:''}]});
+  const addTraveler    = () => updateForm({...form, additionalTravelers: [...travelers, {name:'', nameEn:'', position:'', positionEn:'', phone:'', email:'', rrn:'', accommodation:'', flightInfo:'', travelDepartureDate:'', travelReturnDate:''}]});
   const updateTraveler = (i, key, v) => updateForm({...form, additionalTravelers: travelers.map((t,j) => j===i ? {...t, [key]:v} : t)});
   const removeTraveler = (i) => updateForm({...form, additionalTravelers: travelers.filter((_,j) => j !== i)});
 
@@ -3064,18 +3104,68 @@ function SurveyTab({me, update}){
           ? <div style={{padding:20, background:'var(--ivory-2)', fontSize:12.5, color:'var(--muted)', textAlign:'center', borderRadius:'var(--radius-sm)'}}>
               추가 출장 인원이 있으면 "인원 추가" 버튼으로 등록해주세요. 없으면 비워두셔도 됩니다.
             </div>
-          : <div style={{display:'flex', flexDirection:'column', gap:8}}>
+          : <div style={{display:'flex', flexDirection:'column', gap:14}}>
               {travelers.map((t, i) => (
-                <div key={i} style={{display:'grid', gridTemplateColumns:'1fr 1fr auto', gap:8, alignItems:'end'}}>
-                  <div>
-                    {i===0 && <label className="label" style={{fontSize:10.5}}>이름</label>}
-                    <input className="input" value={t.name||''} onChange={e=>updateTraveler(i, 'name', e.target.value)} placeholder="홍길동"/>
+                <div key={i} style={{border:'1px solid var(--line)', borderRadius:'var(--radius)', padding:16, background:'var(--paper)'}}>
+                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12}}>
+                    <div className="mono" style={{fontSize:11, color:'var(--muted)', letterSpacing:'0.1em'}}>동반 출장자 #{i+1}</div>
+                    <button className="btn btn-danger" style={{padding:'6px 10px', fontSize:12}} onClick={()=>removeTraveler(i)}><Trash2 size={12}/>삭제</button>
                   </div>
-                  <div>
-                    {i===0 && <label className="label" style={{fontSize:10.5}}>직함</label>}
-                    <input className="input" value={t.position||''} onChange={e=>updateTraveler(i, 'position', e.target.value)} placeholder="프로듀서"/>
+                  <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10}}>
+                    <div>
+                      <label className="label" style={{fontSize:10.5}}>이름 (국문)</label>
+                      <input className="input" value={t.name||''} onChange={e=>updateTraveler(i, 'name', e.target.value)} placeholder="홍길동"/>
+                    </div>
+                    <div>
+                      <label className="label" style={{fontSize:10.5}}>이름 (영문)</label>
+                      <input className="input" value={t.nameEn||''} onChange={e=>updateTraveler(i, 'nameEn', e.target.value)} placeholder="Gildong Hong"/>
+                    </div>
+                    <div>
+                      <label className="label" style={{fontSize:10.5}}>직급 (국문)</label>
+                      <input className="input" value={t.position||''} onChange={e=>updateTraveler(i, 'position', e.target.value)} placeholder="프로듀서"/>
+                    </div>
+                    <div>
+                      <label className="label" style={{fontSize:10.5}}>직급 (영문)</label>
+                      <input className="input" value={t.positionEn||''} onChange={e=>updateTraveler(i, 'positionEn', e.target.value)} placeholder="Producer"/>
+                    </div>
+                    <div>
+                      <label className="label" style={{fontSize:10.5}}>연락처</label>
+                      <input className="input" value={t.phone||''} onChange={e=>updateTraveler(i, 'phone', e.target.value)} placeholder="+82-10-0000-0000"/>
+                    </div>
+                    <div>
+                      <label className="label" style={{fontSize:10.5}}>이메일</label>
+                      <input className="input" value={t.email||''} onChange={e=>updateTraveler(i, 'email', e.target.value)} placeholder="name@company.com"/>
+                    </div>
                   </div>
-                  <button className="btn btn-danger" style={{padding:'9px 12px'}} onClick={()=>removeTraveler(i)}><Trash2 size={12}/></button>
+
+                  <div style={{marginTop:14, paddingTop:14, borderTop:'1px solid var(--line)'}}>
+                    <div style={{fontSize:11.5, color:'var(--muted)', lineHeight:1.6, marginBottom:8, padding:'8px 12px', background:'var(--ivory-2)', borderRadius:'var(--radius-sm)'}}>
+                      <Shield size={11} style={{display:'inline', marginRight:4, marginBottom:-1}}/>
+                      아래 정보(주민등록번호·항공·일정·숙소)는 <strong style={{color:'var(--ink-2)', fontWeight:600}}>여행자 보험 가입 및 출장 관리 목적</strong>으로만 사용되며, 사업 종료 후 30일 이내 파기됩니다. 동반 출장자도 인천 출발일부터 도착일까지 전체 여정 기준으로 보험이 가입되니 정확히 기입해주세요.
+                    </div>
+                    <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10}}>
+                      <div style={{gridColumn:'1 / -1'}}>
+                        <label className="label" style={{fontSize:10.5}}>주민등록번호 <span style={{color:'var(--muted)'}}>· 여행자 보험용</span></label>
+                        <input className="input" value={t.rrn||''} onChange={e=>updateTraveler(i, 'rrn', e.target.value)} placeholder="000000-0000000" style={{letterSpacing:'0.02em'}}/>
+                      </div>
+                      <div>
+                        <label className="label" style={{fontSize:10.5}}>인천 출발일 (출국)</label>
+                        <input className="input" type="date" value={t.travelDepartureDate||''} onChange={e=>updateTraveler(i, 'travelDepartureDate', e.target.value)}/>
+                      </div>
+                      <div>
+                        <label className="label" style={{fontSize:10.5}}>인천 도착일 (귀국)</label>
+                        <input className="input" type="date" value={t.travelReturnDate||''} onChange={e=>updateTraveler(i, 'travelReturnDate', e.target.value)}/>
+                      </div>
+                      <div style={{gridColumn:'1 / -1'}}>
+                        <label className="label" style={{fontSize:10.5}}>항공 일정</label>
+                        <textarea className="input" rows={2} value={t.flightInfo||''} onChange={e=>updateTraveler(i, 'flightInfo', e.target.value)} placeholder="예: 출국 KE901 10/10 ICN → CDG / 입국 KE926 10/15 NCE → ICN" style={{resize:'vertical', fontFamily:'inherit'}}/>
+                      </div>
+                      <div style={{gridColumn:'1 / -1'}}>
+                        <label className="label" style={{fontSize:10.5}}>숙소 정보</label>
+                        <textarea className="input" rows={2} value={t.accommodation||''} onChange={e=>updateTraveler(i, 'accommodation', e.target.value)} placeholder="숙소명 / 주소 / 체크인·아웃 일정 등" style={{resize:'vertical', fontFamily:'inherit'}}/>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
@@ -6630,11 +6720,16 @@ function LogoUploader({me, update}){
   const inputRef = useRef(null);
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [lost, setLost] = useState(false); // 키는 있으나 저장 데이터를 불러오지 못함(유실)
 
   useEffect(() => {
-    if (!me.logoKey) { setPreview(null); return; }
+    if (!me.logoKey) { setPreview(null); setLost(false); return; }
     let cancelled=false;
-    loadBlob(me.logoKey).then(d => !cancelled && setPreview(d));
+    loadBlob(me.logoKey).then(d => {
+      if (cancelled) return;
+      setPreview(d);
+      setLost(!(d && d.data));
+    });
     return () => {cancelled=true;};
   }, [me.logoKey, me.id]);
 
@@ -6701,16 +6796,23 @@ function LogoUploader({me, update}){
           </div>
         </div>
       ) : (
-        <button onClick={()=>inputRef.current?.click()} disabled={busy} style={{
-          width:'100%', padding:32, border:'1px dashed var(--line)', borderRadius:'var(--radius)',
-          textAlign:'center', background:'var(--ivory-2)', cursor:'pointer', fontFamily:'inherit',
-          color:'var(--muted)', display:'flex', flexDirection:'column', alignItems:'center', gap:10,
-        }}>
-          <Upload size={22}/>
-          <div style={{fontSize:13.5, color:'var(--ink)', fontWeight:500}}>클릭하여 로고 업로드</div>
-          <div style={{fontSize:11.5}}>PNG / JPG / SVG · 200MB 이하 · 정사각형 권장</div>
-          {busy && <div style={{fontSize:11}}>업로드 중…</div>}
-        </button>
+        <>
+          {lost && (
+            <div style={{padding:'10px 14px', marginBottom:10, background:'#fdecea', border:'1px solid #f5b7b1', color:'#a93226', borderRadius:'var(--radius-sm)', fontSize:12.5, lineHeight:1.6}}>
+              ⚠ 이전에 업로드한 로고를 불러오지 못했습니다. 저장 중 문제가 있었을 수 있으니 <b>다시 업로드해 주세요.</b>
+            </div>
+          )}
+          <button onClick={()=>inputRef.current?.click()} disabled={busy} style={{
+            width:'100%', padding:32, border:'1px dashed var(--line)', borderRadius:'var(--radius)',
+            textAlign:'center', background:'var(--ivory-2)', cursor:'pointer', fontFamily:'inherit',
+            color:'var(--muted)', display:'flex', flexDirection:'column', alignItems:'center', gap:10,
+          }}>
+            <Upload size={22}/>
+            <div style={{fontSize:13.5, color:'var(--ink)', fontWeight:500}}>클릭하여 로고 {lost ? '다시 ' : ''}업로드</div>
+            <div style={{fontSize:11.5}}>PNG / JPG / SVG · 200MB 이하 · 정사각형 권장</div>
+            {busy && <div style={{fontSize:11}}>업로드 중…</div>}
+          </button>
+        </>
       )}
       <input ref={inputRef} type="file" accept="image/*" style={{display:'none'}} onChange={handleUpload}/>
     </div>
@@ -6724,11 +6826,16 @@ function KeyVisualUploader({me, update}){
   const inputRef = useRef(null);
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [lost, setLost] = useState(false); // 키는 있으나 저장 데이터를 불러오지 못함(유실)
 
   useEffect(() => {
-    if (!me.keyVisualKey) { setPreview(null); return; }
+    if (!me.keyVisualKey) { setPreview(null); setLost(false); return; }
     let cancelled=false;
-    loadBlob(me.keyVisualKey).then(d => !cancelled && setPreview(d));
+    loadBlob(me.keyVisualKey).then(d => {
+      if (cancelled) return;
+      setPreview(d);
+      setLost(!(d && d.data));
+    });
     return () => {cancelled=true;};
   }, [me.keyVisualKey, me.id]);
 
@@ -6797,16 +6904,23 @@ function KeyVisualUploader({me, update}){
           </div>
         </div>
       ) : (
-        <button onClick={()=>inputRef.current?.click()} disabled={busy} style={{
-          width:'100%', padding:36, border:'1px dashed var(--line)', borderRadius:'var(--radius)',
-          textAlign:'center', background:'var(--ivory-2)', cursor:'pointer', fontFamily:'inherit',
-          color:'var(--muted)', display:'flex', flexDirection:'column', alignItems:'center', gap:10,
-        }}>
-          <Upload size={22}/>
-          <div style={{fontSize:13.5, color:'var(--ink)', fontWeight:500}}>클릭하여 회사 대표 이미지 업로드</div>
-          <div style={{fontSize:11.5}}>PNG / JPG · 200MB 이하 · 가로형(16:9 등) 권장</div>
-          {busy && <div style={{fontSize:11}}>업로드 중…</div>}
-        </button>
+        <>
+          {lost && (
+            <div style={{padding:'10px 14px', marginBottom:10, background:'#fdecea', border:'1px solid #f5b7b1', color:'#a93226', borderRadius:'var(--radius-sm)', fontSize:12.5, lineHeight:1.6}}>
+              ⚠ 이전에 업로드한 회사 대표 이미지를 불러오지 못했습니다. 저장 중 문제가 있었을 수 있으니 <b>다시 업로드해 주세요.</b>
+            </div>
+          )}
+          <button onClick={()=>inputRef.current?.click()} disabled={busy} style={{
+            width:'100%', padding:36, border:'1px dashed var(--line)', borderRadius:'var(--radius)',
+            textAlign:'center', background:'var(--ivory-2)', cursor:'pointer', fontFamily:'inherit',
+            color:'var(--muted)', display:'flex', flexDirection:'column', alignItems:'center', gap:10,
+          }}>
+            <Upload size={22}/>
+            <div style={{fontSize:13.5, color:'var(--ink)', fontWeight:500}}>클릭하여 회사 대표 이미지 {lost ? '다시 ' : ''}업로드</div>
+            <div style={{fontSize:11.5}}>PNG / JPG · 200MB 이하 · 가로형(16:9 등) 권장</div>
+            {busy && <div style={{fontSize:11}}>업로드 중…</div>}
+          </button>
+        </>
       )}
       <input ref={inputRef} type="file" accept="image/*" style={{display:'none'}} onChange={handleUpload}/>
     </div>
@@ -6816,6 +6930,7 @@ function KeyVisualUploader({me, update}){
 function IPImageUploader({form, setForm}){
   const inputRef = useRef(null);
   const [previews, setPreviews] = useState({});
+  const [lostKeys, setLostKeys] = useState({}); // 불러오지 못한 이미지 키(유실)
   const [busy, setBusy] = useState(false);
 
   const images = form.images || [];
@@ -6828,8 +6943,13 @@ function IPImageUploader({form, setForm}){
     })).then(results => {
       if (cancelled) return;
       const map = {};
-      results.forEach(r => { if (r.data) map[r.key] = r.data; });
+      const lost = {};
+      results.forEach(r => {
+        if (r.data && r.data.data) map[r.key] = r.data;
+        else lost[r.key] = true;
+      });
       setPreviews(map);
+      setLostKeys(lost);
     });
     return () => { cancelled = true; };
   }, [images.length]);
@@ -6880,7 +7000,9 @@ function IPImageUploader({form, setForm}){
             <div key={img.key} style={{position:'relative', aspectRatio:'1', border:'1px solid var(--line)', borderRadius:'var(--radius-sm)', overflow:'hidden', background:'var(--ivory-2)'}}>
               {data
                 ? <img src={data.data} style={{width:'100%', height:'100%', objectFit:'cover'}} alt=""/>
-                : <div style={{display:'grid', placeItems:'center', height:'100%', color:'var(--muted)', fontSize:10}}>로딩…</div>}
+                : lostKeys[img.key]
+                  ? <div style={{display:'grid', placeItems:'center', height:'100%', color:'#a93226', fontSize:9.5, textAlign:'center', padding:6, background:'#fdecea', lineHeight:1.4}}>⚠ 불러오기 실패<br/>삭제 후 다시 업로드</div>
+                  : <div style={{display:'grid', placeItems:'center', height:'100%', color:'var(--muted)', fontSize:10}}>로딩…</div>}
               <button onClick={()=>removeImage(img.key)} title="삭제" style={{position:'absolute', top:5, right:5, width:22, height:22, borderRadius:'50%', border:'none', background:'rgba(0,0,0,0.7)', color:'white', cursor:'pointer', display:'grid', placeItems:'center'}}>
                 <X size={11}/>
               </button>
@@ -6917,18 +7039,31 @@ function ExhibitorDetailModal({exhibitor, changeLogs, onClose, onEdit, readOnly}
   const [logo, setLogo] = useState(null);
   const [keyVisual, setKeyVisual] = useState(null);
   const [downloading, setDownloading] = useState(false);
+  // 이미지 로드 상태: 'idle'(키 없음=미업로드) | 'loading' | 'ok' | 'lost'(키는 있으나 본체 로드 실패=유실)
+  const [logoStatus, setLogoStatus] = useState('idle');
+  const [keyVisualStatus, setKeyVisualStatus] = useState('idle');
 
   useEffect(() => {
-    if (!e.logoKey) { setLogo(null); return; }
+    if (!e.logoKey) { setLogo(null); setLogoStatus('idle'); return; }
     let cancelled=false;
-    loadBlob(e.logoKey).then(d => !cancelled && setLogo(d));
+    setLogoStatus('loading');
+    loadBlob(e.logoKey).then(d => {
+      if (cancelled) return;
+      setLogo(d);
+      setLogoStatus(d && d.data ? 'ok' : 'lost');
+    });
     return () => {cancelled=true;};
   }, [e.id, e.logoKey]);
 
   useEffect(() => {
-    if (!e.keyVisualKey) { setKeyVisual(null); return; }
+    if (!e.keyVisualKey) { setKeyVisual(null); setKeyVisualStatus('idle'); return; }
     let cancelled=false;
-    loadBlob(e.keyVisualKey).then(d => !cancelled && setKeyVisual(d));
+    setKeyVisualStatus('loading');
+    loadBlob(e.keyVisualKey).then(d => {
+      if (cancelled) return;
+      setKeyVisual(d);
+      setKeyVisualStatus(d && d.data ? 'ok' : 'lost');
+    });
     return () => {cancelled=true;};
   }, [e.id, e.keyVisualKey]);
 
@@ -7167,6 +7302,14 @@ function ExhibitorDetailModal({exhibitor, changeLogs, onClose, onEdit, readOnly}
                 </button>
                 )}
               </div>
+            ) : logoStatus === 'lost' ? (
+              <div style={{padding:14, background:'#fdecea', border:'1px solid #f5b7b1', fontSize:12.5, color:'#a93226', borderRadius:'var(--radius-sm)', marginBottom:16}}>
+                ⚠ 회사 로고 저장 오류 — 데이터가 확인되지 않습니다. 참가사에게 <b>재업로드</b>를 요청하세요.
+              </div>
+            ) : logoStatus === 'loading' ? (
+              <div style={{padding:14, background:'var(--ivory-2)', fontSize:12.5, color:'var(--muted)', borderRadius:'var(--radius-sm)', marginBottom:16}}>
+                회사 로고 불러오는 중…
+              </div>
             ) : (
               <div style={{padding:14, background:'var(--ivory-2)', fontSize:12.5, color:'var(--muted)', borderRadius:'var(--radius-sm)', marginBottom:16}}>
                 회사 로고 미업로드
@@ -7191,6 +7334,14 @@ function ExhibitorDetailModal({exhibitor, changeLogs, onClose, onEdit, readOnly}
                   </button>
                   )}
                 </div>
+              </div>
+            ) : keyVisualStatus === 'lost' ? (
+              <div style={{padding:14, background:'#fdecea', border:'1px solid #f5b7b1', fontSize:12.5, color:'#a93226', borderRadius:'var(--radius-sm)', marginBottom:16}}>
+                ⚠ 회사 대표 이미지 저장 오류 — 데이터가 확인되지 않습니다. 참가사에게 <b>재업로드</b>를 요청하세요.
+              </div>
+            ) : keyVisualStatus === 'loading' ? (
+              <div style={{padding:14, background:'var(--ivory-2)', fontSize:12.5, color:'var(--muted)', borderRadius:'var(--radius-sm)', marginBottom:16}}>
+                회사 대표 이미지 불러오는 중…
               </div>
             ) : (
               <div style={{padding:14, background:'var(--ivory-2)', fontSize:12.5, color:'var(--muted)', borderRadius:'var(--radius-sm)', marginBottom:16}}>
@@ -7620,14 +7771,36 @@ function SurveyDetail({survey, project}){
         <div className="label" style={{marginBottom:4}}>추가 출장 인원 ({travelers.length}명)</div>
         {travelers.length === 0
           ? <div style={{fontSize:13, color:'var(--muted-2)'}}>없음</div>
-          : <div style={{display:'flex', flexDirection:'column', gap:6, background:'var(--ivory-2)', padding:12, borderRadius:'var(--radius-sm)'}}>
-              {travelers.map((t, i) => (
-                <div key={i} style={{display:'flex', gap:10, fontSize:13}}>
-                  <span style={{fontWeight:500, minWidth:60}}>{t.name || '—'}</span>
-                  <span style={{color:'var(--muted)'}}>·</span>
-                  <span>{t.position || '—'}</span>
-                </div>
-              ))}
+          : <div style={{display:'flex', flexDirection:'column', gap:10}}>
+              {travelers.map((t, i) => {
+                const rrn = t.rrn || '';
+                const rrnMasked = rrn ? (rrn.length > 8 ? rrn.slice(0,8) + '******' : rrn.replace(/.(?=.{0,0}$)/g,'*')) : '';
+                const row = (label, val) => (
+                  <div style={{display:'flex', gap:8, fontSize:12.5, lineHeight:1.5}}>
+                    <span style={{color:'var(--muted)', minWidth:96, flexShrink:0}}>{label}</span>
+                    <span style={{color: val ? 'var(--ink)' : 'var(--muted-2)', wordBreak:'break-all', whiteSpace:'pre-wrap'}}>{val || '미입력'}</span>
+                  </div>
+                );
+                return (
+                  <div key={i} style={{background:'var(--ivory-2)', padding:14, borderRadius:'var(--radius-sm)'}}>
+                    <div style={{display:'flex', gap:8, alignItems:'baseline', marginBottom:8}}>
+                      <span className="mono" style={{fontSize:10, color:'var(--muted)'}}>#{String(i+1).padStart(2,'0')}</span>
+                      <span style={{fontWeight:600, fontSize:13.5}}>{t.name || '—'}</span>
+                      {t.nameEn && <span style={{color:'var(--muted)', fontSize:12.5}}>({t.nameEn})</span>}
+                      {(t.position || t.positionEn) && <span style={{color:'var(--muted)'}}>· {t.position||''}{t.position && t.positionEn ? ' / ' : ''}{t.positionEn||''}</span>}
+                    </div>
+                    <div style={{display:'flex', flexDirection:'column', gap:3}}>
+                      {row('연락처', t.phone)}
+                      {row('이메일', t.email)}
+                      {row('주민등록번호', rrnMasked)}
+                      {row('인천 출발일', t.travelDepartureDate)}
+                      {row('인천 도착일', t.travelReturnDate)}
+                      {row('항공 일정', t.flightInfo)}
+                      {row('숙소 정보', t.accommodation)}
+                    </div>
+                  </div>
+                );
+              })}
             </div>}
       </div>
 
