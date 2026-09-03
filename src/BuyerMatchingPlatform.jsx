@@ -3160,10 +3160,12 @@ function SurveyTab({me, update}){
                         <label className="label" style={{fontSize:10.5}}>항공 일정</label>
                         <textarea className="input" rows={2} value={t.flightInfo||''} onChange={e=>updateTraveler(i, 'flightInfo', e.target.value)} placeholder="예: 출국 KE901 10/10 ICN → CDG / 입국 KE926 10/15 NCE → ICN" style={{resize:'vertical', fontFamily:'inherit'}}/>
                       </div>
+                      {!hideAccommodation && (
                       <div style={{gridColumn:'1 / -1'}}>
                         <label className="label" style={{fontSize:10.5}}>숙소 정보</label>
                         <textarea className="input" rows={2} value={t.accommodation||''} onChange={e=>updateTraveler(i, 'accommodation', e.target.value)} placeholder="숙소명 / 주소 / 체크인·아웃 일정 등" style={{resize:'vertical', fontFamily:'inherit'}}/>
                       </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -7796,7 +7798,7 @@ function SurveyDetail({survey, project}){
                       {row('인천 출발일', t.travelDepartureDate)}
                       {row('인천 도착일', t.travelReturnDate)}
                       {row('항공 일정', t.flightInfo)}
-                      {row('숙소 정보', t.accommodation)}
+                      {s.project !== 'CANADA' && row('숙소 정보', t.accommodation)}
                     </div>
                   </div>
                 );
