@@ -7798,7 +7798,7 @@ function SurveyDetail({survey, project}){
                       {row('인천 출발일', t.travelDepartureDate)}
                       {row('인천 도착일', t.travelReturnDate)}
                       {row('항공 일정', t.flightInfo)}
-                      {s.project !== 'CANADA' && row('숙소 정보', t.accommodation)}
+                      {project !== 'CANADA' && row('숙소 정보', t.accommodation)}
                     </div>
                   </div>
                 );
