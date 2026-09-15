@@ -781,7 +781,7 @@ const BLOCKED_SLOTS = [
     date: '2026-10-12',
     times: ['13:00','13:30','14:00'],  // 30분 슬롯 단위 (13:00~14:30 차단)
     type: 'showcase',
-    title: '피칭 시간',
+    title: '피칭 쇼케이스',
     schedule: '10월 12일(월) 13:30 – 14:30',
     venue: 'Auditorium Philippe Erlanger (Level 4)',
     note: '피칭 시간 — 미팅 편성 불가',
