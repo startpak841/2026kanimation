@@ -769,10 +769,22 @@ const BLOCKED_SLOTS = [
     date: '2026-06-24',
     times: ['10:30','11:00','11:30','12:00'],  // 30분 슬롯 단위 (10:30~12:30 차단)
     type: 'showcase',
-    title: 'Kanimation Showcase: Fresh Voices from Korea',
+    title: '피칭 쇼케이스',
+    subtitle: 'Kanimation Showcase: Fresh Voices from Korea',
     schedule: '6월 24일(수) 11:00 – 12:15',
     venue: 'Imperial Palace · Verdi Room (Level 3)',
     note: '한국 애니메이션 신규 IP 피칭 쇼케이스 — 전 참가사 필참',
+  },
+  {
+    id: 'mipcom-kanimation-pitching-2026',
+    project: 'MIPCOM',
+    date: '2026-10-12',
+    times: ['13:00','13:30','14:00'],  // 30분 슬롯 단위 (13:00~14:30 차단)
+    type: 'showcase',
+    title: '피칭 시간',
+    schedule: '10월 12일(월) 13:30 – 14:30',
+    venue: 'Auditorium Philippe Erlanger (Level 4)',
+    note: '피칭 시간 — 미팅 편성 불가',
   },
 ];
 
@@ -3741,8 +3753,8 @@ function MyMeetingsTab({state, update, me}){
                               <div className="mono" style={{fontSize:9.5, letterSpacing:'0.18em', color:'#FBBF24', fontWeight:700, display:'flex', alignItems:'center', gap:6}}>
                                 <Lock size={10}/> OFFICIAL SCHEDULE · 미팅 등록 불가
                               </div>
-                              <div style={{fontSize:14, fontWeight:700, marginTop:3}}>피칭 쇼케이스</div>
-                              <div style={{fontSize:12, opacity:0.95, lineHeight:1.45}}>{blocked.title}</div>
+                              <div style={{fontSize:14, fontWeight:700, marginTop:3}}>{blocked.title}</div>
+                              {blocked.subtitle && <div style={{fontSize:12, opacity:0.95, lineHeight:1.45}}>{blocked.subtitle}</div>}
                               <div style={{display:'flex', gap:18, marginTop:5, fontSize:11, opacity:0.9, flexWrap:'wrap'}}>
                                 <span className="mono">🕘 {blocked.schedule}</span>
                                 <span>📍 {blocked.venue}</span>
@@ -5948,8 +5960,8 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                                   textAlign:'center',
                                 }}>
                                   <div className="mono" style={{fontSize:9, letterSpacing:'0.18em', color:'#FBBF24', fontWeight:700}}>OFFICIAL SCHEDULE</div>
-                                  <div style={{fontSize:12.5, fontWeight:700, lineHeight:1.25, marginTop:2}}>피칭 쇼케이스</div>
-                                  <div style={{fontSize:10, opacity:0.95, lineHeight:1.4, marginTop:2}}>{blocked.title}</div>
+                                  <div style={{fontSize:12.5, fontWeight:700, lineHeight:1.25, marginTop:2}}>{blocked.title}</div>
+                                  {blocked.subtitle && <div style={{fontSize:10, opacity:0.95, lineHeight:1.4, marginTop:2}}>{blocked.subtitle}</div>}
                                   <div className="mono" style={{fontSize:10, marginTop:3, opacity:0.85}}>{blocked.schedule}</div>
                                   <div style={{fontSize:10, opacity:0.85, lineHeight:1.3}}>{blocked.venue}</div>
                                 </div>
