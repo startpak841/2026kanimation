@@ -5654,6 +5654,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
       status: 'confirmed',
       notes: '',
       buyerId: null,
+      arrangedBy: 'admin',
       _companyName: '',
       _contactName: '',
       _position: '',
@@ -5668,6 +5669,9 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
     setModalMode('edit');
     setModalData({
       ...m,
+      arrangedBy: m.source === 'exhibitor_self' ? 'exhibitor'
+                : m.source === 'admin_none' ? 'none'
+                : 'admin',
       _companyName: b?.companyName || '',
       _contactName: b?.contactName || '',
       _position: b?.position || '',
@@ -5733,11 +5737,17 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
         notes: modalData.notes || '',
       };
 
+      // 어레인지 주체 → 미팅 출처(source) 매핑. MIPCOM·CANADA만 주체 선택 반영.
+      const arrangeEnabled = subProject === 'MIPCOM' || subProject === 'CANADA';
+      const sourceFromArrange = modalData.arrangedBy === 'exhibitor' ? 'exhibitor_self'
+                              : modalData.arrangedBy === 'none' ? 'admin_none'
+                              : 'admin_manual';
+
       if (modalMode === 'new') {
         const newMeeting = {
           id: `MT-${String(s.meetings.length + 1).padStart(3,'0')}`,
           ...meetingFields,
-          source: 'admin_manual',
+          source: arrangeEnabled ? sourceFromArrange : 'admin_manual',
           createdBy: 'admin',
         };
         // 바이어 동기화 — 신규 미팅의 일자/시간/참가사를 확정 정보로 저장
@@ -5752,7 +5762,9 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
           : b);
         return {
           ...s, buyers: buyersFinal,
-          meetings: s.meetings.map(m => m.id === modalData.id ? {...m, ...meetingFields} : m)
+          meetings: s.meetings.map(m => m.id === modalData.id
+            ? {...m, ...meetingFields, ...(arrangeEnabled ? {source: sourceFromArrange} : {})}
+            : m)
         };
       }
     });
@@ -5818,11 +5830,15 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
           </span>
           <span style={{display:'inline-flex', alignItems:'center', gap:6}}>
             <span style={{display:'inline-block', width:18, height:14, background:'#F59E0B', borderRadius:3}}/>
-            관리자 편성
+            사무국 편성
           </span>
           <span style={{display:'inline-flex', alignItems:'center', gap:6}}>
             <span style={{display:'inline-block', width:18, height:14, background:'#6B7280', borderRadius:3}}/>
             자동 생성 (CSV)
+          </span>
+          <span style={{display:'inline-flex', alignItems:'center', gap:6}}>
+            <span style={{display:'inline-block', width:18, height:14, background:'#9CA3AF', borderRadius:3}}/>
+            미실시
           </span>
         </div>
         <div style={{display:'flex', alignItems:'center', gap:18, flexWrap:'wrap', paddingTop:8, borderTop:'1px solid var(--line-2)'}}>
@@ -5990,15 +6006,18 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                                 const dragging = draggingId === m.id;
                                 // 미팅 출처에 따른 셀 색상 구분
                                 const isExhibitor = m.source === 'exhibitor_self';
+                                const isNone = m.source === 'admin_none';
                                 const isAdmin = m.source === 'admin_added' || m.source === 'admin_manual';
-                                const isAuto = !isExhibitor && !isAdmin;
+                                const isAuto = !isExhibitor && !isAdmin && !isNone;
                                 // 출처별 색상 — 셀 배경 통일
                                 const bg = isExhibitor ? '#06B6D4'   // 청록 — 참가사
-                                         : isAdmin ? '#F59E0B'        // 황금 — 관리자
+                                         : isAdmin ? '#F59E0B'        // 황금 — 사무국(관리자)
+                                         : isNone ? '#9CA3AF'         // 밝은 회색 — 미실시
                                          : '#6B7280';                  // 회색 — 자동
                                 const fg = '#fff';
                                 const sourceLabel = isExhibitor ? '참가사 등록'
-                                                  : isAdmin ? '관리자 편성'
+                                                  : isAdmin ? '사무국 편성'
+                                                  : isNone ? '미실시'
                                                   : '자동 생성 (CSV)';
                                 // 미팅 상태 배지 정보
                                 const status = m.status || 'confirmed';
@@ -6177,6 +6196,38 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                 </div>
               );
             })()}
+
+            {/* 어레인지 주체 선택 — MIPCOM·CANADA 전용. 출처(색상) 수동 지정 */}
+            {(subProject === 'MIPCOM' || subProject === 'CANADA') && (
+              <div style={{gridColumn:'1 / -1', marginTop:4}}>
+                <label className="label" style={{marginBottom:8, display:'block'}}>어레인지 주체</label>
+                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10}}>
+                  {[
+                    { key:'admin',     label:'사무국', color:'#F59E0B' },
+                    { key:'exhibitor', label:'참가사', color:'#06B6D4' },
+                    { key:'none',      label:'미실시', color:'#6B7280' },
+                  ].map(opt => {
+                    const active = (modalData.arrangedBy || 'admin') === opt.key;
+                    return (
+                      <button key={opt.key} type="button"
+                        onClick={()=>setModalData({...modalData, arrangedBy:opt.key})}
+                        style={{
+                          padding:'11px 12px', borderRadius:'var(--radius-sm)', cursor:'pointer',
+                          border:`1px solid ${active ? opt.color : 'var(--line)'}`,
+                          background: active ? opt.color : 'var(--paper)',
+                          color: active ? '#fff' : 'var(--ink-2)',
+                          fontSize:13, fontWeight:600, transition:'all .12s',
+                          display:'flex', alignItems:'center', justifyContent:'center', gap:8,
+                        }}>
+                        <span style={{width:11, height:11, borderRadius:3, background: active ? '#fff' : opt.color, opacity: active ? 0.9 : 1, flexShrink:0}}/>
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{fontSize:11, color:'var(--muted)', marginTop:7}}>선택한 주체에 따라 스케줄 슬롯 색상이 구분됩니다. (사무국=황금 · 참가사=청록 · 미실시=회색)</div>
+              </div>
+            )}
 
             {/* 바이어 정보 — 수동 입력 */}
             <div style={{gridColumn:'1 / -1', padding:'14px 16px', background:'var(--ivory-2)', borderRadius:'var(--radius-sm)', marginTop:4}}>
