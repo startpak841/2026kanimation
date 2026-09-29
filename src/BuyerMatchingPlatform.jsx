@@ -5562,8 +5562,9 @@ const SCHEDULE_COLUMN_ORDER = {
   ],
 };
 function AdminScheduleTab({state, fullState, update, project, readOnly}){
-  const projects = ['MIFA','MIPCOM','CANADA'];
-  const defaultProject = project === 'ALL' ? 'MIFA' : project;
+  // 스케줄 탭 행사 순서: MIPCOM → CANADA → MIFA (표시 순서만, 데이터 무관)
+  const projects = ['MIPCOM','CANADA','MIFA'];
+  const defaultProject = project === 'ALL' ? 'MIPCOM' : project;
   const [subProject, setSubProject] = useState(defaultProject);
   const config = EVENT_CONFIG[subProject];
   const [selectedDate, setSelectedDate] = useState(config.dates[0]?.date || '');
@@ -5971,7 +5972,12 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
             </div>
           ) : (
             <div className="card" style={{overflow:'auto'}}>
-              <table style={{width:'100%', borderCollapse:'separate', borderSpacing:0, fontSize:12}}>
+              {/* 열 너비 균등 고정: 시간열 88px + 참가사 열 균등 분할(열당 최소 180px, 부족하면 그때만 가로 스크롤) */}
+              <table style={{width:'100%', minWidth: 88 + exhibitorsInProject.length * 180, tableLayout:'fixed', borderCollapse:'separate', borderSpacing:0, fontSize:12}}>
+                <colgroup>
+                  <col style={{width:88}}/>
+                  {exhibitorsInProject.map(ex => <col key={ex.id}/>)}
+                </colgroup>
                 <thead>
                   <tr>
                     <th style={{position:'sticky', left:0, top:0, background:'var(--ivory-2)', padding:'10px 14px', textAlign:'left', borderBottom:'1px solid var(--line)', borderRight:'1px solid var(--line)', minWidth:72, zIndex:3}}>
@@ -6097,7 +6103,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                                       cursor: readOnly ? 'default' : 'grab',
                                       background: bg, color: fg,
                                       transition:'all .15s', minHeight:34,
-                                      display:'flex', alignItems:'center', justifyContent:'space-between', gap:6,
+                                      display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:6,
                                       opacity: dragging ? 0.4 : (isCancelled ? 0.55 : 1),
                                       textDecoration: isCancelled ? 'line-through' : 'none',
                                       boxShadow: dragging ? 'none' : '0 1px 2px rgba(0,0,0,0.08)',
@@ -6106,7 +6112,9 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                                     title={readOnly
                                       ? `${buyer?.companyName || '—'} · ${buyer?.contactName || '—'}\n출처: ${sourceLabel}\n상태: ${statusConfig.label}`
                                       : `${buyer?.companyName || '—'} · ${buyer?.contactName || '—'}\n출처: ${sourceLabel}\n상태: ${statusConfig.label}\n드래그로 이동 · 클릭으로 편집`}>
-                                    <div style={{fontSize:12, fontWeight:600, lineHeight:1.2, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', flex:1, textAlign:'left'}}>
+                                    {/* 바이어명 최대 2줄 줄바꿈, 초과분만 … (전체명은 마우스 오버 툴팁) */}
+                                    <div style={{fontSize:12, fontWeight:600, lineHeight:1.3, flex:1, minWidth:0, textAlign:'left',
+                                      display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden', wordBreak:'break-word'}}>
                                       {buyer?.companyName || '—'}
                                     </div>
                                     {/* 상태 배지 — 확정/조율중/취소 한눈에 */}
