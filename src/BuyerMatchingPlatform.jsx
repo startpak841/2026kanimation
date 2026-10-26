@@ -155,14 +155,15 @@ function clEqual(a, b) {
 }
 
 // 한 참가사(before/after)를 비교해 로그 엔트리 배열 반환
-function clDiffExhibitor(before, after) {
+function clDiffExhibitor(before, after, actor = '참가사') {
   const ts = new Date().toISOString();
+  const byAdmin = actor === '관리자';
   const base = {
     ts,
     exhibitorId: after.id,
     company: after.companyName || after.companyNameEn || after.id,
     project: after.project || '',
-    actor: '참가사',
+    actor,
   };
   const out = [];
 
@@ -172,8 +173,14 @@ function clDiffExhibitor(before, after) {
       // 이미지 키: 교체 여부만 기록
       const bHas = !!before[key], aHas = !!after[key];
       if (before[key] !== after[key]) {
-        out.push({ ...base, section: '회사정보', field: key, label,
-          before: bHas ? '등록됨' : '(없음)', after: aHas ? (bHas ? '교체됨' : '등록됨') : '삭제됨' });
+        const entry = { ...base, section: '회사정보', field: key, label,
+          before: bHas ? '등록됨' : '(없음)', after: aHas ? (bHas ? '교체됨' : '등록됨') : '삭제됨' };
+        // 관리자 대리 수정 시 이전 이미지는 삭제되지 않고 보존됨 → 이력에서 열람 가능하도록 키 기록
+        if (byAdmin && bHas) {
+          const meta = key === 'logoKey' ? before.logoMeta : before.keyVisualMeta;
+          entry.preservedImages = [{ key: before[key], name: (meta && meta.name) || label }];
+        }
+        out.push(entry);
       }
       continue;
     }
@@ -220,11 +227,22 @@ function clDiffExhibitor(before, after) {
           before: clFmt(bip[key]), after: clFmt(aip[key]) });
       }
     }
-    // 이미지: 장수 변화만 (base64 미저장)
-    const bImg = (bip.images || []).length, aImg = (aip.images || []).length;
-    if (bImg !== aImg) {
-      out.push({ ...base, section: 'IP', field: 'ip_images', label: `[${ipName}] 이미지`,
-        before: `${bImg}장`, after: `${aImg}장${aImg > bImg ? ' (추가)' : ' (삭제/교체)'}` });
+    // 이미지: 장수 + 교체 여부 (base64 미저장, 키 기준 비교 → 같은 장수 교체도 기록)
+    const bImgs = bip.images || [], aImgs = aip.images || [];
+    const bImg = bImgs.length, aImg = aImgs.length;
+    const bKeys = new Set(bImgs.map(i => i.key)), aKeys = new Set(aImgs.map(i => i.key));
+    const removed = bImgs.filter(i => !aKeys.has(i.key));
+    const added = aImgs.filter(i => !bKeys.has(i.key));
+    if (removed.length || added.length) {
+      const parts = [];
+      if (added.length) parts.push(`추가 ${added.length}`);
+      if (removed.length) parts.push(`삭제/교체 ${removed.length}`);
+      const entry = { ...base, section: 'IP', field: 'ip_images', label: `[${ipName}] 이미지`,
+        before: `${bImg}장`, after: `${aImg}장 (${parts.join(' · ')})` };
+      if (byAdmin && removed.length) {
+        entry.preservedImages = removed.map(i => ({ key: i.key, name: i.name || 'image' }));
+      }
+      out.push(entry);
     }
   }
 
@@ -232,7 +250,7 @@ function clDiffExhibitor(before, after) {
 }
 
 // prev/next state 전체를 비교해 모든 참가사 변경 로그를 뽑아 next에 append한 state 반환
-function clApply(prev, next) {
+function clApply(prev, next, actor = '참가사') {
   if (!prev || !next || !Array.isArray(next.exhibitors)) return next;
   const prevMap = new Map((prev.exhibitors || []).map(e => [e.id, e]));
   let entries = [];
@@ -240,7 +258,7 @@ function clApply(prev, next) {
     const before = prevMap.get(after.id);
     if (!before) continue; // 신규 참가사 생성은 로그 대상 아님
     // updatedAt만 바뀌고 실제 내용 동일한 경우를 걸러내기 위해 diff 결과로만 판단
-    entries = entries.concat(clDiffExhibitor(before, after));
+    entries = entries.concat(clDiffExhibitor(before, after, actor));
   }
   if (entries.length === 0) return next;
   const existing = Array.isArray(next.changeLogs) ? next.changeLogs : [];
@@ -362,6 +380,19 @@ async function deleteBlob(key) {
     }
     try { await window.storage.delete(key); } catch {}
   } catch {}
+}
+
+// ============================ 관리자 대리 입력 (PROXY) ============================
+// 관리자가 참가사 화면을 대신 열어 수정하는 모드. App 렌더 시 auth 기준으로 갱신됨.
+// - 이 모드에서는 교체·삭제되는 이미지를 지우지 않고 보존(retireBlob → no-op)
+// - 로고/대표이미지는 고정 키 덮어쓰기를 피하려고 고유 키로 업로드(proxyImgKey)
+let PROXY_ADMIN_ACTIVE = false;
+async function retireBlob(key) {
+  if (PROXY_ADMIN_ACTIVE) return; // 보존: 실제 삭제하지 않음
+  return deleteBlob(key);
+}
+function proxyImgKey(baseKey) {
+  return PROXY_ADMIN_ACTIVE ? `${baseKey}:${Date.now()}` : baseKey;
 }
 
 function downloadBlob(payload) {
@@ -1774,7 +1805,8 @@ export default function BuyerMatchingPlatform() {
     if (auth?.role === 'exhibitor' && state?.exhibitors) {
       const exists = state.exhibitors.some(e => e.id === auth.userId);
       if (!exists) {
-        setAuth(null);
+        // 관리자 대리 입력 중이었다면 관리자 화면으로 복귀
+        setAuth(auth.proxyAdmin || null);
       }
     }
   }, [auth, state]);
@@ -1831,10 +1863,21 @@ export default function BuyerMatchingPlatform() {
     };
   }, [state === null]);
 
+  // 관리자 대리 입력 모드: 참가사 화면이지만 관리자가 조작 중 (auth.proxyAdmin = 원래 관리자 auth)
+  const isProxy = auth?.role === 'exhibitor' && !!auth?.proxyAdmin;
+  PROXY_ADMIN_ACTIVE = isProxy;
+  // 변경 이력 작성자: 관리자 콘솔 또는 대리 입력 → '관리자', 참가사 본인 → '참가사'
+  const logActor = (auth?.role === 'admin' || isProxy) ? '관리자' : '참가사';
+  const enterProxy = (exhibitorId) => {
+    if (auth?.role !== 'admin' || auth?.viewerMode) return; // KOCCA 열람 모드 불가
+    setAuth({ role: 'exhibitor', userId: exhibitorId, proxyAdmin: auth });
+  };
+  const exitProxy = () => setAuth(auth?.proxyAdmin || null);
+
   const update = (fn) => {
     setState(prev => {
       const rawNext = fn(prev);
-      const next = clApply(prev, rawNext);  // 참가사 변경분 자동 로그 기록
+      const next = clApply(prev, rawNext, logActor);  // 참가사 변경분 자동 로그 기록 (작성자 포함)
       saveState(next);
       return next;
     });
@@ -1854,10 +1897,13 @@ export default function BuyerMatchingPlatform() {
       <style>{css}</style>
       {!auth && <LoginScreen state={state} onAuth={setAuth} />}
       {auth?.role === 'exhibitor' && (
-        <ExhibitorPortal state={state} update={update} userId={auth.userId} onLogout={()=>setAuth(null)} />
+        <ExhibitorPortal state={state} update={update} userId={auth.userId}
+          proxyAdmin={isProxy}
+          onLogout={isProxy ? exitProxy : ()=>setAuth(null)} />
       )}
       {auth?.role === 'admin' && (
-        <AdminConsole state={state} update={update} viewerMode={auth.viewerMode} onLogout={()=>setAuth(null)} />
+        <AdminConsole state={state} update={update} viewerMode={auth.viewerMode} onLogout={()=>setAuth(null)}
+          onProxyEnter={auth.viewerMode ? null : enterProxy} />
       )}
 
       {/* 실시간 동기화 인디케이터 */}
@@ -2203,7 +2249,7 @@ function RoleCard({icon, title, en, desc, onClick, accent}){
 }
 
 // ============================ EXHIBITOR PORTAL ============================
-function ExhibitorPortal({ state, update, userId, onLogout }) {
+function ExhibitorPortal({ state, update, userId, onLogout, proxyAdmin }) {
   const me = state.exhibitors.find(e => e.id === userId);
   const [tab, setTab] = useState('profile');
 
@@ -2220,11 +2266,25 @@ function ExhibitorPortal({ state, update, userId, onLogout }) {
   return (
     <div>
       <PortalHeader
-        role={`PARTICIPANT PORTAL · ${me.project}`}
+        role={proxyAdmin ? `ADMIN PROXY · ${me.project}` : `PARTICIPANT PORTAL · ${me.project}`}
         name={me.companyName}
         sub={me.companyNameEn || '—'}
         onLogout={onLogout}
+        logoutLabel={proxyAdmin ? '관리자 화면으로 돌아가기' : undefined}
       />
+      {proxyAdmin && (
+        <div style={{background:'#FEF3C7', borderBottom:'1px solid #F59E0B', color:'#92400E'}}>
+          <div style={{maxWidth:1360, margin:'0 auto', padding:'10px 40px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, flexWrap:'wrap', fontSize:12.5, lineHeight:1.5}}>
+            <div>
+              <AlertCircle size={14} style={{verticalAlign:'middle', marginRight:6, marginBottom:2}}/>
+              <b>관리자 대리 입력 중</b> — 여기서 저장한 변경은 변경 이력에 <b>'관리자'</b>로 기록됩니다. 교체·삭제한 이미지는 지워지지 않고 보존되며, 참가사 기존 입력값은 이력에 이전값으로 남습니다.
+            </div>
+            <button className="btn btn-ghost" onClick={onLogout} style={{padding:'6px 12px', fontSize:12, border:'1px solid #F59E0B', color:'#92400E', background:'#fff'}}>
+              관리자 화면으로 돌아가기
+            </button>
+          </div>
+        </div>
+      )}
 
       <nav style={{background:'linear-gradient(180deg, #1E1B4B 0%, #312E81 100%)', borderBottom:'1px solid rgba(139,92,246,0.3)'}}>
         <div style={{maxWidth:1360, margin:'0 auto', padding:'0 40px', display:'flex', gap:4, overflowX:'auto'}}>
@@ -2268,7 +2328,7 @@ function ExhibitorPortal({ state, update, userId, onLogout }) {
   );
 }
 
-function PortalHeader({role, name, sub, onLogout}){
+function PortalHeader({role, name, sub, onLogout, logoutLabel}){
   return (
     <header style={{
       background:'linear-gradient(135deg, #2EC4E6 0%, #8B5CF6 50%, #E879F9 100%)',
@@ -2291,7 +2351,7 @@ function PortalHeader({role, name, sub, onLogout}){
         </div>
       </div>
       <button className="btn btn-dark-ghost" onClick={onLogout} style={{position:'relative', zIndex:1}}>
-        <LogOut size={14}/>로그아웃
+        <LogOut size={14}/>{logoutLabel || '로그아웃'}
       </button>
     </header>
   );
@@ -4045,7 +4105,7 @@ function ArrayField({label, placeholder, items, onChange}){
 }
 
 // ============================ ADMIN CONSOLE ============================
-function AdminConsole({ state, update, viewerMode, onLogout }) {
+function AdminConsole({ state, update, viewerMode, onLogout, onProxyEnter }) {
   // KOCCA 뷰어는 4개 탭만 허용: 참가사 정보 · 비즈니스 상담 스케줄 · RSVP · 매칭 매트릭스
   const isKoccaViewer = viewerMode === 'kocca';
   const readOnly = isKoccaViewer;  // 읽기 전용 모드 플래그
@@ -4143,7 +4203,7 @@ function AdminConsole({ state, update, viewerMode, onLogout }) {
       <main style={{maxWidth:1360, margin:'0 auto', padding:'40px'}}>
         {tab === 'overview'   && <OverviewTab state={fstate} project={project}/>}
         {tab === 'buyers'     && <BuyersTab state={fstate} fullState={state} update={update} project={project} readOnly={readOnly}/>}
-        {tab === 'exhibitors' && <ExhibitorsTab state={fstate} update={update} readOnly={readOnly}/>}
+        {tab === 'exhibitors' && <ExhibitorsTab state={fstate} update={update} readOnly={readOnly} onProxy={readOnly ? null : onProxyEnter}/>}
         {tab === 'rsvp'       && <RsvpTab state={fstate} fullState={state} update={update} project={project} readOnly={readOnly}/>}
         {tab === 'schedule'   && <AdminScheduleTab state={fstate} fullState={state} update={update} project={project} readOnly={readOnly}/>}
         {tab === 'matrix'     && <MatchMatrixTab state={fstate} fullState={state} project={project}/>}
@@ -5119,7 +5179,7 @@ function Modal({title, children, onClose}){
 }
 
 // ---------------- EXHIBITORS MANAGEMENT ----------------
-function ExhibitorsTab({state, update, readOnly}){
+function ExhibitorsTab({state, update, readOnly, onProxy}){
   const [detailId, setDetailId] = useState(null);
   const [editId, setEditId] = useState(null);
   const [search, setSearch] = useState('');
@@ -5298,6 +5358,7 @@ function ExhibitorsTab({state, update, readOnly}){
           changeLogs={state?.changeLogs || []}
           onClose={()=>setDetailId(null)}
           onEdit={readOnly ? null : () => { setEditId(detail.id); setDetailId(null); }}
+          onProxy={(readOnly || !onProxy) ? null : () => { const id = detail.id; setDetailId(null); onProxy(id); }}
           readOnly={readOnly}
         />
       )}
@@ -6867,8 +6928,8 @@ function LogoUploader({me, update}){
     setBusy(true);
     try {
       // 기존 로고 있으면 삭제
-      if (me.logoKey) await deleteBlob(me.logoKey);
-      const key = `img:logo:${me.id}`;
+      if (me.logoKey) await retireBlob(me.logoKey);
+      const key = proxyImgKey(`img:logo:${me.id}`);
       const payload = await saveBlob(key, file);
       update(s => ({...s, exhibitors: s.exhibitors.map(x => x.id===me.id ? {
         ...x, logoKey: key, logoMeta: { name: payload.name, type: payload.type, size: payload.size }
@@ -6882,7 +6943,7 @@ function LogoUploader({me, update}){
 
   const handleRemove = async () => {
     if (!confirm('로고를 삭제하시겠습니까?')) return;
-    if (me.logoKey) await deleteBlob(me.logoKey);
+    if (me.logoKey) await retireBlob(me.logoKey);
     update(s => ({...s, exhibitors: s.exhibitors.map(x => x.id===me.id ? {
       ...x, logoKey: null, logoMeta: null
     } : x)}));
@@ -6972,8 +7033,8 @@ function KeyVisualUploader({me, update}){
     setBusy(true);
     try {
       // 기존 대표 이미지 있으면 삭제
-      if (me.keyVisualKey) await deleteBlob(me.keyVisualKey);
-      const key = `img:keyvisual:${me.id}`;
+      if (me.keyVisualKey) await retireBlob(me.keyVisualKey);
+      const key = proxyImgKey(`img:keyvisual:${me.id}`);
       const payload = await saveBlob(key, file);
       update(s => ({...s, exhibitors: s.exhibitors.map(x => x.id===me.id ? {
         ...x, keyVisualKey: key, keyVisualMeta: { name: payload.name, type: payload.type, size: payload.size }
@@ -6987,7 +7048,7 @@ function KeyVisualUploader({me, update}){
 
   const handleRemove = async () => {
     if (!confirm('회사 대표 이미지를 삭제하시겠습니까?')) return;
-    if (me.keyVisualKey) await deleteBlob(me.keyVisualKey);
+    if (me.keyVisualKey) await retireBlob(me.keyVisualKey);
     update(s => ({...s, exhibitors: s.exhibitors.map(x => x.id===me.id ? {
       ...x, keyVisualKey: null, keyVisualMeta: null
     } : x)}));
@@ -7098,7 +7159,7 @@ function IPImageUploader({form, setForm}){
   };
 
   const removeImage = async (key) => {
-    await deleteBlob(key);
+    await retireBlob(key);
     setForm({...form, images: images.filter(i => i.key !== key)});
     setPreviews(p => { const n = {...p}; delete n[key]; return n; });
   };
@@ -7143,7 +7204,7 @@ function IPImageUploader({form, setForm}){
 // ADMIN — EXHIBITOR DETAIL MODAL
 // ============================================================================
 
-function ExhibitorDetailModal({exhibitor, changeLogs, onClose, onEdit, readOnly}){
+function ExhibitorDetailModal({exhibitor, changeLogs, onClose, onEdit, onProxy, readOnly}){
   const e = exhibitor;
   const [showLog, setShowLog] = useState(false);
   // 이 참가사의 변경 이력만 최신순 추출
@@ -7309,6 +7370,13 @@ function ExhibitorDetailModal({exhibitor, changeLogs, onClose, onEdit, readOnly}
                 )}
               </button>
               )}
+              {onProxy && !readOnly && (
+                <button className="btn btn-ghost" onClick={onProxy}
+                        title="참가사 화면을 관리자 권한으로 열어 IP·회사소개·수요조사·이미지를 대신 수정합니다. 변경 이력에 '관리자'로 기록됩니다."
+                        style={{padding:'8px 14px', fontSize:12.5, border:'1px solid #F59E0B', color:'#B45309'}}>
+                  <Edit3 size={13}/>관리자 대리 입력
+                </button>
+              )}
               {onEdit && !readOnly && (
                 <button className="btn btn-primary" onClick={onEdit} style={{padding:'8px 14px', fontSize:12.5}}>
                   <Edit3 size={13}/>회사정보 수정
@@ -7363,6 +7431,12 @@ function ExhibitorDetailModal({exhibitor, changeLogs, onClose, onEdit, readOnly}
                       <div style={{display:'inline-flex', alignItems:'center', gap:6, marginBottom:3}}>
                         <span style={{
                           fontSize:9.5, fontWeight:700, padding:'1px 6px', borderRadius:99,
+                          ...(l.actor === '관리자'
+                            ? { background:'#FEF3C7', border:'1px solid #F59E0B', color:'#B45309' }
+                            : { background:'var(--paper)', border:'1px solid var(--line)', color:'var(--muted-2)' }),
+                        }}>{l.actor === '관리자' ? '관리자' : '참가사'}</span>
+                        <span style={{
+                          fontSize:9.5, fontWeight:700, padding:'1px 6px', borderRadius:99,
                           background:'var(--ivory)', border:'1px solid var(--line)', color:'var(--muted)',
                         }}>{l.section}</span>
                         <span style={{fontWeight:600}}>{l.label}</span>
@@ -7372,6 +7446,17 @@ function ExhibitorDetailModal({exhibitor, changeLogs, onClose, onEdit, readOnly}
                         <span style={{margin:'0 6px', color:'var(--ink)'}}>→</span>
                         <span style={{color:'var(--ink)', fontWeight:500}}>{l.after}</span>
                       </div>
+                      {Array.isArray(l.preservedImages) && l.preservedImages.length > 0 && (
+                        <div style={{display:'flex', alignItems:'center', gap:6, marginTop:6, flexWrap:'wrap'}}>
+                          <span style={{fontSize:10, color:'var(--muted-2)'}}>보존된 이전 이미지 (클릭 시 다운로드)</span>
+                          {l.preservedImages.map(img => (
+                            <span key={img.key} title={img.name}>
+                              <AsyncThumb imgKey={img.key} size={40}
+                                onClick={async () => { const d = await loadBlob(img.key); if (d) downloadBlob(d); else alert('이미지를 불러올 수 없습니다.'); }}/>
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
