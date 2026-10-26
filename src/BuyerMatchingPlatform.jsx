@@ -79,19 +79,142 @@ const defaultState = {
   rsvpSheetSync: { MIFA: null, MIPCOM: null, CANADA: null }, // 마지막 동기화 시각 (ISO string)
 };
 
+// [안전장치] 읽기 실패 시 빈 기본값을 저장하지 않는다.
+// 예전에는 네트워크 오류 등으로 읽기에 실패하면 defaultState를 저장해 전체 데이터가 초기화될 위험이 있었음.
+// → 최대 3회 재시도 후에도 실패하면 아무것도 저장하지 않고 오류를 던져 화면에 안내한다.
 async function loadState() {
-  try {
-    const res = await window.storage.get(DB_KEY);
-    if (res && res.value) return JSON.parse(res.value);
-  } catch (e) { /* not initialised */ }
-  await window.storage.set(DB_KEY, JSON.stringify(defaultState));
-  return defaultState;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await window.storage.get(DB_KEY);
+      if (res && res.value) {
+        const parsed = JSON.parse(res.value);
+        if (parsed && Array.isArray(parsed.exhibitors)) return parsed;
+        lastErr = new Error('데이터 형식이 올바르지 않습니다.');
+      } else {
+        lastErr = new Error('데이터를 불러오지 못했습니다.');
+      }
+    } catch (e) { lastErr = e; }
+    if (attempt < 3) await new Promise(r => setTimeout(r, 800 * attempt));
+  }
+  throw lastErr || new Error('데이터를 불러오지 못했습니다.');
+}
+
+// [안전장치] 참가사·미팅·바이어가 모두 비어 있는 상태는 저장하지 않는다(비정상 상태로 간주).
+function isSuspiciousEmptyState(state) {
+  if (!state || !Array.isArray(state.exhibitors)) return true;
+  return state.exhibitors.length === 0
+    && (state.meetings || []).length === 0
+    && (state.buyers || []).length === 0;
 }
 
 async function saveState(state) {
+  if (isSuspiciousEmptyState(state)) {
+    console.error('[saveState] 비어 있는 상태 저장을 차단했습니다.');
+    return;
+  }
   try {
     await window.storage.set(DB_KEY, JSON.stringify(state));
   } catch (e) { console.error('Save failed', e); }
+}
+
+// ============================ 백업 관리 (BACKUP) ============================
+// 같은 app_state 테이블에 별도 키로 전체 상태 사본을 저장한다(DB 구조 변경 없음).
+//   - 사본  : kags_backup:<ISO시각>
+//   - 목록  : kags_backup_index  (메타데이터 배열: 시각·종류·메모·건수)
+// 보관 정책: 자동(auto) 최근 24개 + 날짜별 첫 자동 백업 7일(daily), 수동·복원직전 최근 30개
+const BACKUP_INDEX_KEY = 'kags_backup_index';
+const BACKUP_PREFIX = 'kags_backup:';
+const BACKUP_AUTO_INTERVAL_MS = 30 * 60 * 1000;
+const BACKUP_KEEP_AUTO = 24, BACKUP_KEEP_DAILY_DAYS = 7, BACKUP_KEEP_MANUAL = 30;
+
+function backupCounts(state) {
+  const exProj = new Map((state.exhibitors || []).map(e => [e.id, e.project]));
+  const perProject = {};
+  for (const m of (state.meetings || [])) {
+    const p = exProj.get(m.exhibitorId) || '(참가사 없음)';
+    perProject[p] = (perProject[p] || 0) + 1;
+  }
+  return {
+    exhibitors: (state.exhibitors || []).length,
+    meetings: (state.meetings || []).length,
+    buyers: (state.buyers || []).length,
+    perProject,
+  };
+}
+
+async function readBackupIndex() {
+  try {
+    const res = await window.storage.get(BACKUP_INDEX_KEY);
+    if (res && res.value) {
+      const arr = JSON.parse(res.value);
+      if (Array.isArray(arr)) return arr;
+    }
+  } catch {}
+  return [];
+}
+
+function kstDay(iso) {
+  return new Date(new Date(iso).getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+// 보관 정책 적용 → [유지할 목록, 삭제할 키]
+function pruneBackups(index) {
+  const sorted = index.slice().sort((a, b) => b.ts.localeCompare(a.ts));
+  const keep = new Set();
+  const autos = sorted.filter(b => b.type === 'auto');
+  autos.slice(0, BACKUP_KEEP_AUTO).forEach(b => keep.add(b.key));
+  const cutoff = Date.now() - BACKUP_KEEP_DAILY_DAYS * 24 * 3600 * 1000;
+  const seenDay = new Set();
+  for (const b of autos.slice().reverse()) { // 오래된 순 → 날짜별 첫 백업
+    const d = kstDay(b.ts);
+    if (!seenDay.has(d)) { seenDay.add(d); if (new Date(b.ts).getTime() >= cutoff) keep.add(b.key); }
+  }
+  sorted.filter(b => b.type !== 'auto').slice(0, BACKUP_KEEP_MANUAL).forEach(b => keep.add(b.key));
+  return [sorted.filter(b => keep.has(b.key)), sorted.filter(b => !keep.has(b.key)).map(b => b.key)];
+}
+
+// 백업 생성. 성공 시 메타데이터 반환, 실패 시 throw
+async function createBackup(state, type = 'manual', label = '') {
+  if (isSuspiciousEmptyState(state)) throw new Error('비어 있는 상태는 백업하지 않습니다.');
+  const ts = new Date().toISOString();
+  const key = BACKUP_PREFIX + ts;
+  const json = JSON.stringify(state);
+  const ok = await window.storage.set(key, json);
+  if (!ok) throw new Error('백업 저장에 실패했습니다.');
+  const meta = { key, ts, type, label: label || '', size: json.length, counts: backupCounts(state) };
+  const index = await readBackupIndex();
+  const [kept, removeKeys] = pruneBackups([meta, ...index.filter(b => b.key !== key)]);
+  await window.storage.set(BACKUP_INDEX_KEY, JSON.stringify(kept));
+  for (const k of removeKeys) { try { await window.storage.delete(k); } catch {} }
+  return meta;
+}
+
+async function loadBackup(key) {
+  const res = await window.storage.get(key);
+  if (!res || !res.value) throw new Error('백업 데이터를 찾을 수 없습니다.');
+  const s = JSON.parse(res.value);
+  if (!s || !Array.isArray(s.exhibitors)) throw new Error('백업 데이터 형식이 올바르지 않습니다.');
+  return s;
+}
+
+// 복원 범위별로 현재 상태에 백업 내용을 덮어쓴 새 상태를 만든다.
+// 변경 이력(changeLogs)은 감사 기록이므로 항상 현재 것을 유지한다.
+const RESTORE_SCOPES = {
+  all:        { label: '전체 (참가사·미팅·바이어·초청/RSVP 등)', keys: null },
+  exhibitors: { label: '참가사 정보만', keys: ['exhibitors'] },
+  meetings:   { label: '미팅만', keys: ['meetings'] },
+  buyers:     { label: '바이어만 (초청 기록 포함)', keys: ['buyers', 'invitationLog'] },
+};
+function buildRestoredState(current, backup, scope) {
+  const conf = RESTORE_SCOPES[scope];
+  if (!conf) return current;
+  if (!conf.keys) {
+    return { ...current, ...backup, changeLogs: current.changeLogs || [] };
+  }
+  const next = { ...current };
+  for (const k of conf.keys) next[k] = backup[k] !== undefined ? backup[k] : current[k];
+  return next;
 }
 
 // ============================ CHANGE LOG (변경 이력) ============================
@@ -107,7 +230,7 @@ const CL_FIELD_LABELS = {
   companyName: '회사명(국문)', companyNameEn: '회사명(영문)',
   contactName: '담당자(국문)', contactNameEn: '담당자(영문)',
   positionKo: '직함(국문)', positionEn: '직함(영문)',
-  email: '이메일', phone: '연락처', introEn: '회사소개(영문)',
+  email: '이메일', phone: '연락처', website: '웹사이트', introEn: '회사소개(영문)',
   logoKey: '로고 이미지', keyVisualKey: '키비주얼 이미지',
 };
 // IP 필드 라벨
@@ -1791,8 +1914,11 @@ export default function BuyerMatchingPlatform() {
   const [state, setState] = useState(null);
   const [auth, setAuth] = useState(() => loadAuthFromStorage()); // {role:'exhibitor'|'admin', userId?}
   const [syncIndicator, setSyncIndicator] = useState(null); // 동기화 피드백 UI
+  const [loadError, setLoadError] = useState(null); // [안전장치] 데이터 읽기 실패 시 오류 표시 (저장하지 않음)
 
-  useEffect(() => { loadState().then(setState); }, []);
+  useEffect(() => {
+    loadState().then(setState).catch(err => setLoadError(err?.message || String(err)));
+  }, []);
 
   // auth 변경 시 sessionStorage에도 자동 저장 (새로고침 시 복원용)
   useEffect(() => {
@@ -1882,6 +2008,22 @@ export default function BuyerMatchingPlatform() {
       return next;
     });
   };
+
+  if (!state && loadError) {
+    return (
+      <div className="mice-root" style={{display:'grid', placeItems:'center', minHeight:'100vh', padding:24}}>
+        <style>{css}</style>
+        <div style={{maxWidth:460, textAlign:'center', lineHeight:1.6}}>
+          <div className="serif" style={{fontSize:22, color:'var(--ink)', marginBottom:10}}>데이터를 불러오지 못했습니다</div>
+          <div style={{fontSize:13, color:'var(--muted)', marginBottom:18}}>
+            네트워크 상태를 확인한 뒤 새로고침해 주세요. 기존 데이터는 변경되지 않았습니다.<br/>
+            <span style={{fontSize:11.5, color:'var(--muted-2)'}}>({loadError})</span>
+          </div>
+          <button className="btn btn-primary" onClick={() => window.location.reload()}>새로고침</button>
+        </div>
+      </div>
+    );
+  }
 
   if (!state) {
     return (
@@ -4130,6 +4272,25 @@ function AdminConsole({ state, update, viewerMode, onLogout, onProxyEnter }) {
     };
   }, [state, project]);
 
+  // [백업] 관리자(편집 권한) 접속 중 자동 백업 — 마지막 자동 백업이 30분 지났으면 새로 저장
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  useEffect(() => {
+    if (isKoccaViewer) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const index = await readBackupIndex();
+        const lastAuto = index.filter(b => b.type === 'auto').sort((a, b) => b.ts.localeCompare(a.ts))[0];
+        const due = !lastAuto || (Date.now() - new Date(lastAuto.ts).getTime() >= BACKUP_AUTO_INTERVAL_MS);
+        if (due && !cancelled) await createBackup(stateRef.current, 'auto');
+      } catch (e) { console.warn('[auto-backup] skipped:', e?.message || e); }
+    };
+    const first = setTimeout(tick, 15000);           // 접속 15초 후 1회 확인
+    const iv = setInterval(tick, 5 * 60 * 1000);      // 이후 5분마다 확인(실제 저장은 30분 간격)
+    return () => { cancelled = true; clearTimeout(first); clearInterval(iv); };
+  }, [isKoccaViewer]);
+
   // 탭 정의 — KOCCA에게 허용된 탭만 표시
   const ALL_TABS = [
     {k:'overview',  l:'현황 대시보드', i:<BarChart3 size={15}/>, koccaAllowed:false},
@@ -4138,6 +4299,7 @@ function AdminConsole({ state, update, viewerMode, onLogout, onProxyEnter }) {
     {k:'rsvp',      l:'RSVP',        i:<ClipboardCheck size={15}/>, badge: fstate.buyers.filter(b=>b.invitationStatus==='accepted').length, koccaAllowed:true},
     {k:'schedule',  l:'비즈니스 상담 스케줄', i:<Calendar size={15}/>, badge:fstate.meetings.length, koccaAllowed:true},
     {k:'matrix',    l:'바이어 매칭 매트릭스', i:<Target size={15}/>, koccaAllowed:false},
+    {k:'backup',    l:'백업 관리', i:<Shield size={15}/>, koccaAllowed:false},
   ];
   const TABS = isKoccaViewer ? ALL_TABS.filter(t => t.koccaAllowed) : ALL_TABS;
 
@@ -4207,7 +4369,169 @@ function AdminConsole({ state, update, viewerMode, onLogout, onProxyEnter }) {
         {tab === 'rsvp'       && <RsvpTab state={fstate} fullState={state} update={update} project={project} readOnly={readOnly}/>}
         {tab === 'schedule'   && <AdminScheduleTab state={fstate} fullState={state} update={update} project={project} readOnly={readOnly}/>}
         {tab === 'matrix'     && <MatchMatrixTab state={fstate} fullState={state} project={project}/>}
+        {tab === 'backup' && !readOnly && <BackupTab state={state} update={update}/>}
       </main>
+    </div>
+  );
+}
+
+// ---------------- BACKUP TAB — 백업 목록 · 지금 백업 · 범위별 복원 (관리자 전용) ----------------
+const BACKUP_TYPE_LABEL = { auto: '자동', manual: '수동', 'pre-restore': '복원 직전' };
+function fmtKst(iso) {
+  try { return new Date(iso).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }); }
+  catch { return iso; }
+}
+function fmtPerProject(pp) {
+  const order = ['MIPCOM', 'CANADA', 'MIFA'];
+  const rank = k => { const i = order.indexOf(k); return i < 0 ? 99 : i; };
+  const keys = Object.keys(pp || {}).sort((a, b) => rank(a) - rank(b));
+  return keys.map(k => `${k} ${pp[k]}`).join(' · ');
+}
+
+function BackupTab({ state, update }) {
+  const [index, setIndex] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [memo, setMemo] = useState('');
+  const [msg, setMsg] = useState(null);           // {type:'ok'|'err', text}
+  const [target, setTarget] = useState(null);     // 복원 대상 메타
+  const [scope, setScope] = useState('all');
+  const [agree, setAgree] = useState(false);
+
+  const refresh = async () => setIndex(await readBackupIndex());
+  useEffect(() => { refresh(); }, []);
+
+  const current = backupCounts(state);
+
+  const doBackup = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const meta = await createBackup(state, 'manual', memo.trim());
+      setMemo('');
+      setMsg({ type: 'ok', text: `백업 완료 · ${fmtKst(meta.ts)} · 미팅 ${meta.counts.meetings}건 / 참가사 ${meta.counts.exhibitors}개사` });
+      await refresh();
+    } catch (e) { setMsg({ type: 'err', text: '백업 실패: ' + (e?.message || e) }); }
+    setBusy(false);
+  };
+
+  const doRestore = async () => {
+    if (!target || !agree) return;
+    setBusy(true); setMsg(null);
+    try {
+      const backup = await loadBackup(target.key);
+      // 복원도 되돌릴 수 있도록 현재 상태를 먼저 백업
+      await createBackup(state, 'pre-restore', `${fmtKst(target.ts)} 백업으로 복원하기 직전`);
+      update(s => buildRestoredState(s, backup, scope));
+      setMsg({ type: 'ok', text: `복원 완료 · ${fmtKst(target.ts)} 백업 · 범위: ${RESTORE_SCOPES[scope].label}. 복원 직전 상태는 '복원 직전' 백업으로 저장되어 있습니다.` });
+      setTarget(null); setAgree(false); setScope('all');
+      await refresh();
+    } catch (e) { setMsg({ type: 'err', text: '복원 실패: ' + (e?.message || e) + ' — 데이터는 변경되지 않았습니다.' }); }
+    setBusy(false);
+  };
+
+  const th = { textAlign:'left', padding:'10px 12px', fontSize:11, color:'var(--muted)', fontWeight:600, borderBottom:'1px solid var(--line)', whiteSpace:'nowrap' };
+  const td = { padding:'10px 12px', fontSize:12.5, borderBottom:'1px solid var(--line-2)', verticalAlign:'top' };
+
+  return (
+    <div>
+      <div className="mono" style={{fontSize:10, letterSpacing:'0.18em', color:'var(--muted)', fontWeight:700, marginBottom:6}}>SAFETY · BACKUP</div>
+      <h2 className="serif" style={{fontSize:28, fontWeight:600, margin:'0 0 8px'}}>백업 관리</h2>
+      <div style={{fontSize:13, color:'var(--muted)', lineHeight:1.6, marginBottom:20}}>
+        관리자 화면에 접속해 있는 동안 <b>30분마다 자동 백업</b>됩니다(최근 24개 + 날짜별 7일 보관). 배포·대량 수정 전에는 <b>[지금 백업]</b>을 눌러 두세요.
+        복원 시 변경 이력은 유지되며, 복원 직전 상태가 자동으로 백업되어 복원도 되돌릴 수 있습니다.
+      </div>
+
+      <div className="card" style={{padding:18, marginBottom:18, display:'flex', gap:12, alignItems:'center', flexWrap:'wrap', border:'1px solid var(--line)', borderRadius:'var(--radius-sm)', background:'var(--paper)'}}>
+        <div style={{fontSize:12.5, color:'var(--ink-2)', minWidth:240}}>
+          <b>현재</b> · 참가사 {current.exhibitors} · 미팅 {current.meetings} ({fmtPerProject(current.perProject)}) · 바이어 {current.buyers}
+        </div>
+        <input className="input" style={{flex:'1 1 220px'}} placeholder="메모 (예: CANADA 배포 전)" value={memo} onChange={e => setMemo(e.target.value)} disabled={busy}/>
+        <button className="btn btn-primary" onClick={doBackup} disabled={busy}><Save size={14}/>지금 백업</button>
+        <button className="btn btn-ghost" onClick={refresh} disabled={busy}>목록 새로고침</button>
+      </div>
+
+      {msg && (
+        <div style={{padding:'10px 14px', marginBottom:16, fontSize:12.5, borderRadius:'var(--radius-sm)',
+          background: msg.type === 'ok' ? '#ECFDF5' : '#FEF2F2', color: msg.type === 'ok' ? '#065F46' : '#991B1B',
+          border: `1px solid ${msg.type === 'ok' ? '#6EE7B7' : '#FCA5A5'}`}}>{msg.text}</div>
+      )}
+
+      <div style={{overflowX:'auto', border:'1px solid var(--line)', borderRadius:'var(--radius-sm)', background:'var(--paper)'}}>
+        <table style={{width:'100%', borderCollapse:'collapse', minWidth:760}}>
+          <thead><tr>
+            <th style={th}>시각 (KST)</th><th style={th}>종류</th><th style={th}>메모</th>
+            <th style={th}>참가사</th><th style={th}>미팅 (행사별)</th><th style={th}>바이어</th><th style={th}></th>
+          </tr></thead>
+          <tbody>
+            {index === null && <tr><td style={td} colSpan={7}>불러오는 중…</td></tr>}
+            {index && index.length === 0 && <tr><td style={{...td, color:'var(--muted)'}} colSpan={7}>아직 백업이 없습니다. [지금 백업]을 눌러 첫 백업을 만드세요.</td></tr>}
+            {index && index.map(b => (
+              <tr key={b.key}>
+                <td style={{...td, whiteSpace:'nowrap'}} className="tabular">{fmtKst(b.ts)}</td>
+                <td style={td}>
+                  <span style={{fontSize:10.5, fontWeight:700, padding:'2px 8px', borderRadius:99,
+                    background: b.type === 'manual' ? '#EDE9FE' : b.type === 'pre-restore' ? '#FEF3C7' : 'var(--ivory-2)',
+                    color: b.type === 'manual' ? '#5B21B6' : b.type === 'pre-restore' ? '#92400E' : 'var(--muted)'}}>
+                    {BACKUP_TYPE_LABEL[b.type] || b.type}
+                  </span>
+                </td>
+                <td style={{...td, color: b.label ? 'var(--ink)' : 'var(--muted-2)'}}>{b.label || '—'}</td>
+                <td style={td} className="tabular">{b.counts?.exhibitors}</td>
+                <td style={td} className="tabular">{b.counts?.meetings} <span style={{color:'var(--muted)', fontSize:11}}>({fmtPerProject(b.counts?.perProject)})</span></td>
+                <td style={td} className="tabular">{b.counts?.buyers}</td>
+                <td style={{...td, textAlign:'right'}}>
+                  <button className="btn btn-ghost" style={{padding:'5px 12px', fontSize:12}} disabled={busy}
+                    onClick={() => { setTarget(b); setScope('all'); setAgree(false); setMsg(null); }}>복원…</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {target && (
+        <div className="modal-overlay" onClick={() => !busy && setTarget(null)}>
+          <div className="mice-modal" onClick={e => e.stopPropagation()} style={{maxWidth:560, width:'92%', padding:'24px 26px'}}>
+            <div className="mono" style={{fontSize:10, letterSpacing:'0.18em', color:'var(--muted)', fontWeight:700, marginBottom:6}}>RESTORE</div>
+            <h3 className="serif" style={{fontSize:20, margin:'0 0 14px'}}>{fmtKst(target.ts)} 백업으로 복원</h3>
+
+            <table style={{width:'100%', borderCollapse:'collapse', marginBottom:16, fontSize:12.5}}>
+              <thead><tr><th style={th}></th><th style={th}>현재</th><th style={th}>백업</th></tr></thead>
+              <tbody>
+                {[['참가사', 'exhibitors'], ['미팅', 'meetings'], ['바이어', 'buyers']].map(([l, k]) => (
+                  <tr key={k}>
+                    <td style={td}>{l}</td>
+                    <td style={td} className="tabular">{current[k]}</td>
+                    <td style={{...td, fontWeight: current[k] !== target.counts?.[k] ? 700 : 400, color: current[k] !== target.counts?.[k] ? '#B45309' : 'inherit'}} className="tabular">{target.counts?.[k]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div className="label" style={{marginBottom:8}}>복원 범위</div>
+            <div style={{display:'grid', gap:6, marginBottom:14}}>
+              {Object.entries(RESTORE_SCOPES).map(([k, v]) => (
+                <label key={k} style={{display:'flex', gap:8, alignItems:'center', fontSize:13, cursor:'pointer'}}>
+                  <input type="radio" name="restore-scope" checked={scope === k} onChange={() => setScope(k)} disabled={busy}/>
+                  {v.label}
+                </label>
+              ))}
+            </div>
+
+            <div style={{padding:'10px 12px', background:'#FEF3C7', border:'1px solid #F59E0B', color:'#92400E', fontSize:12, lineHeight:1.6, borderRadius:'var(--radius-sm)', marginBottom:12}}>
+              선택한 범위는 백업 시점 이후 입력된 내용(참가사 입력 포함)이 사라집니다. 복원 직전 상태는 자동으로 백업되며, 변경 이력은 유지됩니다.
+              다른 관리자·참가사가 입력 중이지 않은 시간에 진행하세요.
+            </div>
+            <label style={{display:'flex', gap:8, alignItems:'center', fontSize:12.5, marginBottom:16, cursor:'pointer'}}>
+              <input type="checkbox" checked={agree} onChange={e => setAgree(e.target.checked)} disabled={busy}/>
+              위 내용을 확인했습니다.
+            </label>
+            <div style={{display:'flex', justifyContent:'flex-end', gap:8}}>
+              <button className="btn btn-ghost" onClick={() => setTarget(null)} disabled={busy}>취소</button>
+              <button className="btn btn-primary" onClick={doRestore} disabled={busy || !agree}>{busy ? '처리 중…' : '복원 실행'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
