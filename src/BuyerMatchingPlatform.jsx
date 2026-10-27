@@ -5993,7 +5993,7 @@ function buyerCategoryLabels(b) {
 }
 
 // 회사명 입력 + 드롭다운. 포커스 시 열림, 타이핑 실시간 필터(최대 8개), onMouseDown 선택
-function BuyerCompanyAutocomplete({ value, options, onType, onPick, disabled }) {
+function BuyerCompanyAutocomplete({ value, options, onType, onPick, disabled, placeholder }) {
   const [open, setOpen] = useState(false);
   const q = normBuyerName(value);
   const list = useMemo(() => {
@@ -6006,7 +6006,7 @@ function BuyerCompanyAutocomplete({ value, options, onType, onPick, disabled }) 
              onChange={e => { onType(e.target.value); setOpen(true); }}
              onFocus={() => setOpen(true)}
              onBlur={() => setOpen(false)}
-             placeholder="회사명을 입력하면 등록된 바이어가 표시됩니다 (예: GKIDS)"
+             placeholder={placeholder || '회사명을 입력하면 등록된 바이어가 표시됩니다 (예: GKIDS)'}
              autoComplete="off"
              style={{background:'var(--paper)'}}/>
       {open && !disabled && list.length > 0 && (
@@ -6043,8 +6043,11 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
   const defaultProject = project === 'ALL' ? 'MIPCOM' : project;
   const [subProject, setSubProject] = useState(defaultProject);
   const config = EVENT_CONFIG[subProject];
-  // 바이어 자동완성 후보 (현재 권역, 회사명 기준 중복 병합)
-  const buyerOptions = useMemo(() => buildBuyerOptions(fullState.buyers, subProject), [fullState.buyers, subProject]);
+  // 바이어 자동완성 후보 (현재 권역, 회사명 기준 중복 병합) — CANADA 전용 기능. MIPCOM·MIFA는 기존처럼 직접 입력
+  const BUYER_AUTOCOMPLETE_PROJECTS = ['CANADA'];
+  const autocompleteOn = BUYER_AUTOCOMPLETE_PROJECTS.includes(subProject);
+  const buyerOptions = useMemo(() => autocompleteOn ? buildBuyerOptions(fullState.buyers, subProject) : [],
+    [fullState.buyers, subProject, autocompleteOn]);
   const [selectedDate, setSelectedDate] = useState(config.dates[0]?.date || '');
 
   useEffect(() => { setSelectedDate(config.dates[0]?.date || ''); }, [subProject]);
@@ -6675,7 +6678,9 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
               <Calendar size={10}/>{subProject}
             </div>
             {modalMode === 'new'
-              ? `참가사를 선택하고 회사명을 입력하세요. 이미 등록된 ${subProject} 바이어는 드롭다운에서 고르면 담당자·연락처가 자동으로 채워지고, 목록에 없는 회사는 새 바이어로 ${subProject} 프로젝트에 등록됩니다.`
+              ? (autocompleteOn
+                  ? `참가사를 선택하고 회사명을 입력하세요. 이미 등록된 ${subProject} 바이어는 드롭다운에서 고르면 담당자·연락처가 자동으로 채워지고, 목록에 없는 회사는 새 바이어로 ${subProject} 프로젝트에 등록됩니다.`
+                  : `참가사를 선택하고 바이어 정보(회사명·바이어명·직급·이메일·연락처)를 직접 입력하세요. 등록되는 바이어는 ${subProject} 프로젝트에 자동 배정됩니다.`)
               : '편집한 바이어 정보는 바이어 DB에도 동시에 반영됩니다.'}
           </div>
 
@@ -6785,7 +6790,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
 
             {/* 바이어 정보 — 수동 입력 */}
             <div style={{gridColumn:'1 / -1', padding:'14px 16px', background:'var(--ivory-2)', borderRadius:'var(--radius-sm)', marginTop:4}}>
-              <div className="mono" style={{fontSize:10, letterSpacing:'0.15em', color:'var(--muted)', marginBottom:10}}>BUYER INFO · 등록 바이어 검색 또는 직접 입력</div>
+              <div className="mono" style={{fontSize:10, letterSpacing:'0.15em', color:'var(--muted)', marginBottom:10}}>{autocompleteOn ? 'BUYER INFO · 등록 바이어 검색 또는 직접 입력' : 'BUYER INFO · 수동 입력'}</div>
               <div className="grid" style={{gridTemplateColumns:'1fr 1fr', gap:12}}>
                 <div style={{gridColumn:'1 / -1'}}>
                   <label className="label">회사명 <span style={{color:'var(--red)'}}>*</span></label>
@@ -6794,8 +6799,9 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                     options={buyerOptions}
                     onType={typeBuyerCompany}
                     onPick={pickBuyer}
+                    placeholder={autocompleteOn ? undefined : '예: Netflix Japan, BBC Studios'}
                     disabled={readOnly}/>
-                  {modalData.buyerId && (() => {
+                  {autocompleteOn && modalData.buyerId && (() => {
                     const lb = fullState.buyers.find(b => b.id === modalData.buyerId);
                     const country = modalData._country || lb?.country;
                     const cats = (modalData._categories && modalData._categories.length) ? modalData._categories : buyerCategoryLabels(lb);
