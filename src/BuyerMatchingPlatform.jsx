@@ -6135,7 +6135,7 @@ function BuyerCompanyAutocomplete({ value, options, onType, onPick, disabled, pl
 function AdminScheduleTab({state, fullState, update, project, readOnly}){
   // 스케줄 탭 행사 순서: MIPCOM → CANADA → MIFA (표시 순서만, 데이터 무관)
   const projects = ['MIPCOM','CANADA','MIFA'];
-  const defaultProject = project === 'ALL' ? 'MIPCOM' : project;
+  const defaultProject = project === 'ALL' ? 'CANADA' : project;   // 진행 중 행사 CANADA를 기본으로
   const [subProject, setSubProject] = useState(defaultProject);
   const config = EVENT_CONFIG[subProject];
   // 바이어 자동완성 후보 (현재 권역, 회사명 기준 중복 병합) — CANADA 전용 기능. MIPCOM·MIFA는 기존처럼 직접 입력
@@ -6324,7 +6324,6 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
       _categories: buyerCategoryLabels(b),
     }));
   };
-  const unlinkBuyer = () => setModalData(d => ({ ...d, buyerId: null, _linkSource: null, _country: '', _categories: [] }));
 
   const closeModal = () => { setModalMode(null); setModalData(null); };
 
@@ -6336,6 +6335,14 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
     update(s => {
       let buyers = s.buyers;
       let buyerId = modalData.buyerId;
+      // 드롭다운을 쓰지 않고 직접 타이핑해도, 같은 이름(공백·대소문자 무시)의 등록 바이어가 있으면 자동 연결 (CANADA)
+      let autoLinked = false;
+      if (!buyerId && autocompleteOn) {
+        const hit = buildBuyerOptions(s.buyers, subProject).find(o => o.key === normBuyerName(modalData._companyName));
+        if (hit) { buyerId = hit.buyerId; autoLinked = true; }
+      }
+      // 자동 연결 시: 입력한 값만 반영하고 빈 칸은 기존 바이어 값 유지 (기존 담당자 정보를 지우지 않음)
+      const keepIfBlank = (v, old) => autoLinked && !String(v || '').trim() ? old : v;
 
       if (!buyerId) {
         // 등록 바이어를 고르지 않은 경우에만 신규 바이어 생성 (새 미팅·수정 공통)
@@ -6366,11 +6373,11 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
         // 드롭다운 선택 시 폼에는 중복 묶음에서 병합된 값이 들어 있으므로, 대표 바이어의 빈 칸이 채워진다.
         buyers = s.buyers.map(b => b.id === buyerId ? {
           ...b,
-          companyName: modalData._companyName.trim(),
-          contactName: modalData._contactName,
-          position: modalData._position,
-          email: modalData._email,
-          phone: modalData._phone,
+          companyName: autoLinked ? b.companyName : modalData._companyName.trim(),
+          contactName: keepIfBlank(modalData._contactName, b.contactName),
+          position: keepIfBlank(modalData._position, b.position),
+          email: keepIfBlank(modalData._email, b.email),
+          phone: keepIfBlank(modalData._phone, b.phone),
           ...(modalData._linkSource === 'pick' && !String(b.country || '').trim() && modalData._country ? { country: modalData._country } : {}),
           ...(modalData._linkSource === 'pick' && !buyerCategoryLabels(b).length && (modalData._categories || []).length ? { categories: modalData._categories } : {}),
         } : b);
@@ -6945,30 +6952,6 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                     onPick={pickBuyer}
                     placeholder={autocompleteOn ? undefined : '예: Netflix Japan, BBC Studios'}
                     disabled={readOnly}/>
-                  {autocompleteOn && modalData.buyerId && (() => {
-                    const lb = fullState.buyers.find(b => b.id === modalData.buyerId);
-                    const country = modalData._country || lb?.country;
-                    const cats = (modalData._categories && modalData._categories.length) ? modalData._categories : buyerCategoryLabels(lb);
-                    return (
-                      <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, flexWrap:'wrap',
-                                   padding:'7px 12px', marginTop:8, background:'#ECFDF5', border:'1px solid #6EE7B7',
-                                   borderRadius:'var(--radius-sm)', fontSize:12, color:'#065F46'}}>
-                        <span style={{display:'flex', alignItems:'center', gap:5, flexWrap:'wrap'}}>
-                          ✓ {modalData._linkSource === 'pick' ? '등록 바이어와 연결됨' : '연결된 바이어'}
-                          {[country, ...cats].filter(Boolean).map((t, i) => (
-                            <span key={i} style={{fontSize:11, padding:'1px 8px', borderRadius:99, background:'#EDE9FE', color:'#5B21B6', fontWeight:600}}>{t}</span>
-                          ))}
-                        </span>
-                        {!readOnly && (
-                          <button type="button" onClick={unlinkBuyer}
-                                  title="연결을 풀면 저장 시 입력한 회사명으로 새 바이어가 등록됩니다"
-                                  style={{fontSize:11, border:'1px solid #6EE7B7', background:'#fff', color:'#065F46', borderRadius:5, padding:'3px 8px', cursor:'pointer'}}>
-                            연결 해제
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })()}
                 </div>
                 <div>
                   <label className="label">바이어명 (담당자)</label>
@@ -8946,7 +8929,7 @@ function RsvpTab({state, fullState, update, project, readOnly}){
   const syncTimes = fullState.rsvpSheetSync || { MIFA:null, MIPCOM:null, CANADA:null };
   const projects = ['MIFA','MIPCOM','CANADA'];
   const [showRegister, setShowRegister] = useState(false);
-  const defaultProject = project === 'ALL' ? 'MIFA' : project;
+  const defaultProject = project === 'ALL' ? 'CANADA' : project;   // 진행 중 행사 CANADA를 기본으로
   const [subProject, setSubProject] = useState(defaultProject);
   const [syncing, setSyncing] = useState(null); // 'MIFA' | 'MIPCOM' | 'CANADA' | null
   const [syncResult, setSyncResult] = useState(null);
