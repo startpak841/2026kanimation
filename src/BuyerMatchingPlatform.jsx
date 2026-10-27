@@ -5946,12 +5946,105 @@ const SCHEDULE_COLUMN_ORDER = {
     ['아이젠버그', 'aigenberg'],
   ],
 };
+// ============================ 상담 스케줄 바이어 선택 (자동완성) ============================
+// KOMICS "상담 스케줄 바이어 선택" 이식.
+// - 출처: 전역 buyers 중 현재 권역(subProject)의 바이어 (project 미지정 바이어 포함)
+// - 같은 회사명(공백·대소문자 정규화)끼리 묶고, 정보가 가장 많은 바이어를 대표로 삼아
+//   비어 있는 담당자·직급·이메일·연락처·나라·분류를 묶음 안의 다른 바이어 값으로 채운다.
+function normBuyerName(s) {
+  return String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+const BUYER_MERGE_FIELDS = ['contactName', 'position', 'email', 'phone', 'country'];
+function buyerInfoScore(b) {
+  return BUYER_MERGE_FIELDS.reduce((n, k) => n + (String(b[k] || '').trim() ? 1 : 0), 0)
+    + ((b.categories && b.categories.length) || b.category ? 1 : 0);
+}
+function buildBuyerOptions(buyers, project) {
+  const groups = new Map();
+  for (const b of (buyers || [])) {
+    if (b.project && b.project !== project) continue;
+    const key = normBuyerName(b.companyName);
+    if (!key) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(b);
+  }
+  const out = [];
+  for (const [key, list] of groups) {
+    const sorted = list.slice().sort((a, b) => buyerInfoScore(b) - buyerInfoScore(a));
+    const rep = sorted[0];
+    const merged = { ...rep };
+    for (const k of BUYER_MERGE_FIELDS) {
+      if (!String(merged[k] || '').trim()) {
+        const donor = sorted.find(x => String(x[k] || '').trim());
+        if (donor) merged[k] = donor[k];
+      }
+    }
+    if (!((merged.categories && merged.categories.length) || merged.category)) {
+      const donor = sorted.find(x => (x.categories && x.categories.length) || x.category);
+      if (donor) { merged.categories = donor.categories; merged.category = donor.category; }
+    }
+    out.push({ key, buyerId: rep.id, dupCount: list.length, merged });
+  }
+  return out.sort((a, b) => (a.merged.companyName || '').localeCompare(b.merged.companyName || ''));
+}
+function buyerCategoryLabels(b) {
+  if (Array.isArray(b?.categories) && b.categories.length) return b.categories;
+  return b?.category ? [b.category] : [];
+}
+
+// 회사명 입력 + 드롭다운. 포커스 시 열림, 타이핑 실시간 필터(최대 8개), onMouseDown 선택
+function BuyerCompanyAutocomplete({ value, options, onType, onPick, disabled }) {
+  const [open, setOpen] = useState(false);
+  const q = normBuyerName(value);
+  const list = useMemo(() => {
+    const matched = q ? options.filter(o => o.key.includes(q)) : options;
+    return matched.slice().sort((a, b) => (b.key.startsWith(q) ? 1 : 0) - (a.key.startsWith(q) ? 1 : 0)).slice(0, 8);
+  }, [q, options]);
+  return (
+    <div style={{position:'relative'}}>
+      <input className="input" value={value} disabled={disabled}
+             onChange={e => { onType(e.target.value); setOpen(true); }}
+             onFocus={() => setOpen(true)}
+             onBlur={() => setOpen(false)}
+             placeholder="회사명을 입력하면 등록된 바이어가 표시됩니다 (예: GKIDS)"
+             autoComplete="off"
+             style={{background:'var(--paper)'}}/>
+      {open && !disabled && list.length > 0 && (
+        <div style={{position:'absolute', left:0, right:0, top:'100%', marginTop:4, background:'#fff',
+                     border:'1px solid var(--line)', borderRadius:8, boxShadow:'0 12px 32px rgba(30,27,75,0.18)',
+                     zIndex:50, overflow:'hidden'}}>
+          {list.map(o => (
+            <div key={o.key}
+                 onMouseDown={e => { e.preventDefault(); onPick(o); setOpen(false); }}
+                 style={{padding:'9px 12px', borderBottom:'1px solid var(--line-2)', cursor:'pointer'}}
+                 onMouseEnter={e => { e.currentTarget.style.background = '#F3EEFF'; }}
+                 onMouseLeave={e => { e.currentTarget.style.background = '#fff'; }}>
+              <div style={{fontSize:13, fontWeight:600, color:'var(--ink)'}}>
+                {o.merged.companyName}
+                {o.dupCount > 1 && <span style={{fontSize:10, color:'var(--muted-2)', fontWeight:500, marginLeft:6}}>중복 {o.dupCount}건 → 1건으로 연결</span>}
+              </div>
+              <div style={{fontSize:11.5, color:'var(--muted)', marginTop:2}}>
+                {[o.merged.country || '—', o.merged.contactName || '—', o.merged.email || '—'].join(' · ')}
+              </div>
+            </div>
+          ))}
+          <div style={{padding:'7px 12px', fontSize:11, color:'var(--muted-2)', background:'#FAFAFC'}}>
+            목록에 없으면 그대로 입력 → 새 바이어로 등록됩니다
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminScheduleTab({state, fullState, update, project, readOnly}){
   // 스케줄 탭 행사 순서: MIPCOM → CANADA → MIFA (표시 순서만, 데이터 무관)
   const projects = ['MIPCOM','CANADA','MIFA'];
   const defaultProject = project === 'ALL' ? 'MIPCOM' : project;
   const [subProject, setSubProject] = useState(defaultProject);
   const config = EVENT_CONFIG[subProject];
+  // 바이어 자동완성 후보 (현재 권역, 회사명 기준 중복 병합)
+  const buyerOptions = useMemo(() => buildBuyerOptions(fullState.buyers, subProject), [fullState.buyers, subProject]);
   const [selectedDate, setSelectedDate] = useState(config.dates[0]?.date || '');
 
   useEffect(() => { setSelectedDate(config.dates[0]?.date || ''); }, [subProject]);
@@ -6075,6 +6168,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
       notes: '',
       buyerId: null,
       arrangedBy: 'admin',
+      _linkSource: null,   // 'pick'(드롭다운 선택) | 'existing'(기존 미팅의 바이어) | null(새 바이어)
       _companyName: '',
       _contactName: '',
       _position: '',
@@ -6095,6 +6189,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
       _arrangedByInit: m.source === 'exhibitor_self' ? 'exhibitor'
                      : m.source === 'admin_none' ? 'none'
                      : 'admin',
+      _linkSource: b ? 'existing' : null,
       _companyName: b?.companyName || '',
       _contactName: b?.contactName || '',
       _position: b?.position || '',
@@ -6102,6 +6197,30 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
       _phone: b?.phone || '',
     });
   };
+
+  // 자동완성: 회사명 타이핑 — 드롭다운으로 고른 바이어였다면 연결 해제(새 바이어로 처리)
+  const typeBuyerCompany = (text) => {
+    setModalData(d => d._linkSource === 'pick'
+      ? { ...d, _companyName: text, buyerId: null, _linkSource: null, _country: '', _categories: [] }
+      : { ...d, _companyName: text });
+  };
+  // 자동완성: 바이어 선택 — buyerId(FK)와 연락 정보를 폼에 세팅 (병합된 값 사용)
+  const pickBuyer = (opt) => {
+    const b = opt.merged;
+    setModalData(d => ({
+      ...d,
+      buyerId: opt.buyerId,
+      _linkSource: 'pick',
+      _companyName: b.companyName || '',
+      _contactName: b.contactName || '',
+      _position: b.position || '',
+      _email: b.email || '',
+      _phone: b.phone || '',
+      _country: b.country || '',
+      _categories: buyerCategoryLabels(b),
+    }));
+  };
+  const unlinkBuyer = () => setModalData(d => ({ ...d, buyerId: null, _linkSource: null, _country: '', _categories: [] }));
 
   const closeModal = () => { setModalMode(null); setModalData(null); };
 
@@ -6114,8 +6233,8 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
       let buyers = s.buyers;
       let buyerId = modalData.buyerId;
 
-      if (modalMode === 'new') {
-        // 신규 바이어 생성
+      if (!buyerId) {
+        // 등록 바이어를 고르지 않은 경우에만 신규 바이어 생성 (새 미팅·수정 공통)
         const seq = s.buyers.length + 1;
         buyerId = `BU-${subProject}-${String(seq).padStart(4,'0')}`;
         const guess = guessBuyerField(modalData._companyName);
@@ -6139,14 +6258,17 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
         };
         buyers = [...s.buyers, newBuyer];
       } else {
-        // 편집: 기존 바이어 정보 업데이트
-        buyers = s.buyers.map(b => b.id === modalData.buyerId ? {
+        // 연결된 바이어(드롭다운 선택 또는 기존 미팅) — 새로 만들지 않고 해당 바이어 레코드만 갱신.
+        // 드롭다운 선택 시 폼에는 중복 묶음에서 병합된 값이 들어 있으므로, 대표 바이어의 빈 칸이 채워진다.
+        buyers = s.buyers.map(b => b.id === buyerId ? {
           ...b,
           companyName: modalData._companyName.trim(),
           contactName: modalData._contactName,
           position: modalData._position,
           email: modalData._email,
           phone: modalData._phone,
+          ...(modalData._linkSource === 'pick' && !String(b.country || '').trim() && modalData._country ? { country: modalData._country } : {}),
+          ...(modalData._linkSource === 'pick' && !buyerCategoryLabels(b).length && (modalData._categories || []).length ? { categories: modalData._categories } : {}),
         } : b);
       }
 
@@ -6357,8 +6479,8 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
             </div>
           ) : (
             <div className="card" style={{overflow:'auto'}}>
-              {/* 열 너비 균등 고정: 시간열 88px + 참가사 열 균등 분할(열당 최소 180px, 부족하면 그때만 가로 스크롤) */}
-              <table style={{width:'100%', minWidth: 88 + exhibitorsInProject.length * 180, tableLayout:'fixed', borderCollapse:'separate', borderSpacing:0, fontSize:12}}>
+              {/* 열 너비 균등 고정: 시간열 88px + 참가사 열 균등 분할(열당 최소 150px — 7개사도 1280px 화면폭에서 스크롤 없이 표시, 더 좁을 때만 가로 스크롤) */}
+              <table style={{width:'100%', minWidth: 88 + exhibitorsInProject.length * 150, tableLayout:'fixed', borderCollapse:'separate', borderSpacing:0, fontSize:12}}>
                 <colgroup>
                   <col style={{width:88}}/>
                   {exhibitorsInProject.map(ex => <col key={ex.id}/>)}
@@ -6553,7 +6675,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
               <Calendar size={10}/>{subProject}
             </div>
             {modalMode === 'new'
-              ? `참가사를 선택하고 바이어 정보(회사명·바이어명·직급·이메일·연락처)를 직접 입력하세요. 등록되는 바이어는 ${subProject} 프로젝트에 자동 배정됩니다.`
+              ? `참가사를 선택하고 회사명을 입력하세요. 이미 등록된 ${subProject} 바이어는 드롭다운에서 고르면 담당자·연락처가 자동으로 채워지고, 목록에 없는 회사는 새 바이어로 ${subProject} 프로젝트에 등록됩니다.`
               : '편집한 바이어 정보는 바이어 DB에도 동시에 반영됩니다.'}
           </div>
 
@@ -6663,14 +6785,40 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
 
             {/* 바이어 정보 — 수동 입력 */}
             <div style={{gridColumn:'1 / -1', padding:'14px 16px', background:'var(--ivory-2)', borderRadius:'var(--radius-sm)', marginTop:4}}>
-              <div className="mono" style={{fontSize:10, letterSpacing:'0.15em', color:'var(--muted)', marginBottom:10}}>BUYER INFO · 수동 입력</div>
+              <div className="mono" style={{fontSize:10, letterSpacing:'0.15em', color:'var(--muted)', marginBottom:10}}>BUYER INFO · 등록 바이어 검색 또는 직접 입력</div>
               <div className="grid" style={{gridTemplateColumns:'1fr 1fr', gap:12}}>
                 <div style={{gridColumn:'1 / -1'}}>
                   <label className="label">회사명 <span style={{color:'var(--red)'}}>*</span></label>
-                  <input className="input" value={modalData._companyName}
-                         onChange={e=>setModalData({...modalData, _companyName:e.target.value})}
-                         placeholder="예: Netflix Japan, BBC Studios"
-                         style={{background:'var(--paper)'}}/>
+                  <BuyerCompanyAutocomplete
+                    value={modalData._companyName}
+                    options={buyerOptions}
+                    onType={typeBuyerCompany}
+                    onPick={pickBuyer}
+                    disabled={readOnly}/>
+                  {modalData.buyerId && (() => {
+                    const lb = fullState.buyers.find(b => b.id === modalData.buyerId);
+                    const country = modalData._country || lb?.country;
+                    const cats = (modalData._categories && modalData._categories.length) ? modalData._categories : buyerCategoryLabels(lb);
+                    return (
+                      <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, flexWrap:'wrap',
+                                   padding:'7px 12px', marginTop:8, background:'#ECFDF5', border:'1px solid #6EE7B7',
+                                   borderRadius:'var(--radius-sm)', fontSize:12, color:'#065F46'}}>
+                        <span style={{display:'flex', alignItems:'center', gap:5, flexWrap:'wrap'}}>
+                          ✓ {modalData._linkSource === 'pick' ? '등록 바이어와 연결됨' : '연결된 바이어'}
+                          {[country, ...cats].filter(Boolean).map((t, i) => (
+                            <span key={i} style={{fontSize:11, padding:'1px 8px', borderRadius:99, background:'#EDE9FE', color:'#5B21B6', fontWeight:600}}>{t}</span>
+                          ))}
+                        </span>
+                        {!readOnly && (
+                          <button type="button" onClick={unlinkBuyer}
+                                  title="연결을 풀면 저장 시 입력한 회사명으로 새 바이어가 등록됩니다"
+                                  style={{fontSize:11, border:'1px solid #6EE7B7', background:'#fff', color:'#065F46', borderRadius:5, padding:'3px 8px', cursor:'pointer'}}>
+                            연결 해제
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div>
                   <label className="label">바이어명 (담당자)</label>
