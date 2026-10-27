@@ -976,6 +976,28 @@ function getSlotsForDate(config, date){
   return generateTimeSlots(r.start, r.end, config?.slotMinutes || 30);
 }
 
+// ============================ 미팅 소요시간 (15분 / 30분) ============================
+// CANADA 전용: 표의 칸은 30분 그대로 두고, 미팅마다 소요시간(기본 30분, 15분 선택)을 저장한다.
+// 15분 미팅은 시작 시간을 15분 단위(:15/:45)로 고를 수 있고, 해당 시간이 속한 30분 칸 안에 표시된다.
+const DURATION_PROJECTS = ['CANADA'];
+function meetingDuration(m) { return Number(m?.duration) === 15 ? 15 : 30; }
+// 미팅 시간 → 표의 30분 칸 키 (예: 13:45 → 13:30, 14:15 → 14:00)
+function slotKeyOf(time) {
+  const [h, m] = String(time || '').split(':').map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return time;
+  return `${String(h).padStart(2,'0')}:${m < 30 ? '00' : '30'}`;
+}
+function addMinutesToTime(time, mins) {
+  const [h, m] = String(time || '').split(':').map(Number);
+  const t = h * 60 + m + mins;
+  return `${String(Math.floor(t / 60)).padStart(2,'0')}:${String(t % 60).padStart(2,'0')}`;
+}
+// 15분 단위 시작 시간 목록 (운영 종료 15분 전까지)
+function getQuarterSlotsForDate(config, date) {
+  const r = getTimeRangeForDate(config, date);
+  return generateTimeSlots(r.start, r.end, 15);
+}
+
 // ============================ 회사명 → 분야 자동 추정 ============================
 const FIELD_KEYWORDS = [
   // ─── Streaming / OTT 플랫폼 ─────────────────────────────────────
@@ -3739,7 +3761,9 @@ function MyMeetingsTab({state, update, me}){
   const myMeetings = state.meetings.filter(m => m.exhibitorId === me.id);
   const myMeetingsForDate = myMeetings.filter(m => m.date === selectedDate);
 
-  const meetingsAt = (time) => myMeetingsForDate.filter(m => m.time === time);
+  const meetingsAt = (time) => myMeetingsForDate
+    .filter(m => slotKeyOf(m.time) === time)
+    .sort((a, b) => String(a.time).localeCompare(String(b.time)));
   const getBuyer = (id) => state.buyers.find(b => b.id === id);
 
   // 권한 체크: 본인이 직접 편성한 미팅만 편집 가능
@@ -4026,6 +4050,11 @@ function MyMeetingsTab({state, update, me}){
                                 }}>
                                   {statusConfig.icon}{statusConfig.label}
                                 </span>
+                                {(meetingDuration(m) === 15 || m.time !== time) && (
+                                  <span className="mono tabular" style={{fontSize:11, fontWeight:700, flexShrink:0, opacity:0.9}}>
+                                    {m.time}{meetingDuration(m) === 15 ? ' · 15분' : ''}
+                                  </span>
+                                )}
                                 <span style={{fontSize:13.5, fontWeight:600, flex:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', minWidth:0}}>
                                   {b?.companyName || '—'}
                                 </span>
@@ -6083,7 +6112,11 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
   const [modalData, setModalData] = useState(null);
   const [confirmData, setConfirmData] = useState(null);
 
-  const meetingsAtCell = (exId, time) => meetingsForDate.filter(m => m.exhibitorId === exId && m.time === time);
+  // 미팅은 시작 시간이 속한 30분 칸에 표시 (15분 미팅 13:45 → 13:30 칸), 칸 안에서는 시간순
+  const meetingsAtCell = (exId, time) => meetingsForDate
+    .filter(m => m.exhibitorId === exId && slotKeyOf(m.time) === time)
+    .sort((a, b) => String(a.time).localeCompare(String(b.time)));
+  const durationOn = DURATION_PROJECTS.includes(subProject);
   const getBuyer = id => fullState.buyers.find(b => b.id === id);
   const getExhibitor = id => fullState.exhibitors.find(e => e.id === id);
 
@@ -6105,7 +6138,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
     // 드래그 중인 미팅 정보 미리 확인 (state 외부에서)
     const sourceMeeting = fullState.meetings.find(m => m.id === draggingId);
     // 동일 위치 드롭 방지 (제자리)
-    if (sourceMeeting && sourceMeeting.exhibitorId === exId && sourceMeeting.time === time && sourceMeeting.date === selectedDate) {
+    if (sourceMeeting && sourceMeeting.exhibitorId === exId && slotKeyOf(sourceMeeting.time) === time && sourceMeeting.date === selectedDate) {
       setDraggingId(null);
       setDropTarget(null);
       return;
@@ -6115,7 +6148,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
       m.id !== draggingId &&
       m.exhibitorId === exId &&
       m.date === selectedDate &&
-      m.time === time
+      slotKeyOf(m.time) === time
     );
     if (existingAtTarget.length > 0) {
       const existingNames = existingAtTarget.map(m => {
@@ -6137,7 +6170,9 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
       const meeting = s.meetings.find(m => m.id === draggingId);
       if (!meeting) return s;
       const newDate = selectedDate;
-      const newTime = time;
+      // 15분 미팅이 칸의 뒤쪽 15분(:15/:45)에 있었다면 옮긴 칸에서도 같은 위치 유지
+      const offset15 = meetingDuration(meeting) === 15 && slotKeyOf(meeting.time) !== meeting.time;
+      const newTime = offset15 ? addMinutesToTime(time, 15) : time;
       const newExhId = exId;
       // 미팅 업데이트 (map으로 동일 ID만 갱신 — 절대 중복 생성 안 됨)
       const meetings = s.meetings.map(m => m.id === draggingId
@@ -6283,6 +6318,8 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
         table: modalData.table || '',
         status: modalData.status,
         notes: modalData.notes || '',
+        // 소요시간 — CANADA만 저장 (다른 행사는 필드를 건드리지 않음)
+        ...(DURATION_PROJECTS.includes(subProject) ? { duration: meetingDuration(modalData) } : {}),
       };
 
       // 어레인지 주체 → 미팅 출처(source) 매핑. MIPCOM·CANADA만 주체 선택 반영.
@@ -6623,9 +6660,16 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                                       ? `${buyer?.companyName || '—'} · ${buyer?.contactName || '—'}\n출처: ${sourceLabel}\n상태: ${statusConfig.label}`
                                       : `${buyer?.companyName || '—'} · ${buyer?.contactName || '—'}\n출처: ${sourceLabel}\n상태: ${statusConfig.label}\n드래그로 이동 · 클릭으로 편집`}>
                                     {/* 바이어명 최대 2줄 줄바꿈, 초과분만 … (전체명은 마우스 오버 툴팁) */}
-                                    <div style={{fontSize:12, fontWeight:600, lineHeight:1.3, flex:1, minWidth:0, textAlign:'left',
-                                      display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden', wordBreak:'break-word'}}>
-                                      {buyer?.companyName || '—'}
+                                    <div style={{flex:1, minWidth:0, textAlign:'left'}}>
+                                      <div style={{fontSize:12, fontWeight:600, lineHeight:1.3,
+                                        display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden', wordBreak:'break-word'}}>
+                                        {buyer?.companyName || '—'}
+                                      </div>
+                                      {(meetingDuration(m) === 15 || m.time !== time) && (
+                                        <div className="mono tabular" style={{fontSize:10, fontWeight:600, opacity:0.92, marginTop:2}}>
+                                          {m.time}{meetingDuration(m) === 15 ? ' · 15분' : ''}
+                                        </div>
+                                      )}
                                     </div>
                                     {/* 상태 배지 — 확정/조율중/취소 한눈에 */}
                                     <span style={{
@@ -6693,10 +6737,44 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
             </div>
             <div>
               <label className="label">시간</label>
-              <select className="select" value={modalData.time} onChange={e=>setModalData({...modalData, time:e.target.value})}>
-                {slots.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
+              {(() => {
+                const is15 = durationOn && meetingDuration(modalData) === 15;
+                const opts = is15 ? getQuarterSlotsForDate(config, modalData.date) : getSlotsForDate(config, modalData.date);
+                const list = opts.includes(modalData.time) ? opts : [modalData.time, ...opts];
+                return (
+                  <select className="select" value={modalData.time} onChange={e=>setModalData({...modalData, time:e.target.value})}>
+                    {list.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                );
+              })()}
             </div>
+            {durationOn && (
+              <div style={{gridColumn:'1 / -1'}}>
+                <label className="label">소요시간</label>
+                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10}}>
+                  {[30, 15].map(d => {
+                    const active = meetingDuration(modalData) === d;
+                    return (
+                      <button key={d} type="button" disabled={readOnly}
+                        onClick={() => setModalData(md => ({
+                          ...md, duration: d,
+                          // 30분으로 바꾸면 시작 시간을 30분 칸 시작으로 맞춤 (13:45 → 13:30)
+                          time: d === 30 ? slotKeyOf(md.time) : md.time,
+                        }))}
+                        style={{
+                          padding:'10px 12px', borderRadius:'var(--radius-sm)', cursor: readOnly ? 'default' : 'pointer',
+                          border:`1px solid ${active ? 'var(--ink)' : 'var(--line)'}`,
+                          background: active ? 'var(--ink)' : 'var(--paper)', color: active ? '#fff' : 'var(--ink-2)',
+                          fontSize:13, fontWeight:600, fontFamily:'inherit',
+                        }}>
+                        {d}분{d === 30 ? ' (기본)' : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{fontSize:11, color:'var(--muted)', marginTop:6}}>15분을 고르면 시작 시간을 15분 단위(예: 13:45)로 선택할 수 있고, 같은 30분 칸에 15분 미팅 2개를 넣을 수 있습니다.</div>
+              </div>
+            )}
             <div style={{gridColumn:'1 / -1'}}>
               <label className="label">참가사 <span style={{color:'var(--red)'}}>*</span></label>
               <select className="select" value={modalData.exhibitorId} onChange={e=>setModalData({...modalData, exhibitorId:e.target.value})}>
