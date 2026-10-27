@@ -5948,7 +5948,7 @@ const SCHEDULE_COLUMN_ORDER = {
 };
 // ============================ 상담 스케줄 바이어 선택 (자동완성) ============================
 // KOMICS "상담 스케줄 바이어 선택" 이식.
-// - 출처: 전역 buyers 중 현재 권역(subProject)의 바이어 (project 미지정 바이어 포함)
+// - 출처: 전역 buyers 중 현재 권역(subProject)의 바이어만 (project 미지정·다른 권역 바이어는 제외)
 // - 같은 회사명(공백·대소문자 정규화)끼리 묶고, 정보가 가장 많은 바이어를 대표로 삼아
 //   비어 있는 담당자·직급·이메일·연락처·나라·분류를 묶음 안의 다른 바이어 값으로 채운다.
 function normBuyerName(s) {
@@ -5962,7 +5962,7 @@ function buyerInfoScore(b) {
 function buildBuyerOptions(buyers, project) {
   const groups = new Map();
   for (const b of (buyers || [])) {
-    if (b.project && b.project !== project) continue;
+    if (b.project !== project) continue;   // 권역 단독: 해당 행사 바이어만 후보로
     const key = normBuyerName(b.companyName);
     if (!key) continue;
     if (!groups.has(key)) groups.set(key, []);
