@@ -6021,6 +6021,72 @@ function buyerCategoryLabels(b) {
   return b?.category ? [b.category] : [];
 }
 
+// ============================ 중복 바이어 합치기 ============================
+// 예전에는 미팅을 만들 때마다 바이어가 새로 생겨 같은 회사가 여러 건 쌓였다.
+// 같은 행사(project) 안에서 회사명(공백·대소문자 정규화)이 같은 바이어를 하나로 합친다.
+// - 대표: 정보가 가장 많이 채워진 바이어(동점이면 연결 미팅이 많은 쪽)
+// - 대표의 빈 항목은 묶음 안 다른 바이어 값으로 채움, 희망일은 합집합
+// - 미팅·초청기록의 buyerId를 대표로 다시 연결 → 미팅은 하나도 삭제되지 않음
+// - 확정 일정(confirmedDate/Time/ExhibitorId)은 연결된 미팅 중 가장 이른 것으로 갱신
+const isEmptyVal = v => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
+const INVITE_RANK = { accepted: 4, pending: 3, sent: 2 };
+function planBuyerMerge(state, project) {
+  const groups = new Map();
+  for (const b of (state.buyers || [])) {
+    if (b.project !== project) continue;
+    const key = normBuyerName(b.companyName);
+    if (!key) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(b);
+  }
+  const meetCount = id => (state.meetings || []).filter(m => m.buyerId === id).length;
+  const plan = [];
+  for (const [, list] of groups) {
+    if (list.length < 2) continue;
+    const sorted = list.slice().sort((a, b) =>
+      (buyerInfoScore(b) - buyerInfoScore(a)) || (meetCount(b.id) - meetCount(a.id)));
+    const rep = sorted[0];
+    plan.push({
+      name: rep.companyName,
+      repId: rep.id,
+      dupIds: sorted.slice(1).map(b => b.id),
+      buyers: sorted,
+      meetings: (state.meetings || []).filter(m => list.some(b => b.id === m.buyerId)).length,
+    });
+  }
+  return plan.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+}
+function applyBuyerMerge(state, plan) {
+  if (!plan.length) return state;
+  const remap = new Map();
+  for (const g of plan) for (const id of g.dupIds) remap.set(id, g.repId);
+  const meetings = (state.meetings || []).map(m => remap.has(m.buyerId) ? { ...m, buyerId: remap.get(m.buyerId) } : m);
+  const invitationLog = (state.invitationLog || []).map(l => remap.has(l.buyerId) ? { ...l, buyerId: remap.get(l.buyerId) } : l);
+  const mergedById = new Map();
+  for (const g of plan) {
+    const merged = { ...g.buyers[0] };
+    for (const other of g.buyers.slice(1)) {
+      for (const [k, v] of Object.entries(other)) {
+        if (k === 'id' || k.startsWith('confirmed')) continue;
+        if (isEmptyVal(merged[k]) && !isEmptyVal(v)) merged[k] = v;
+      }
+    }
+    const dates = new Set();
+    for (const b of g.buyers) for (const d of (b.preferredDates || [])) dates.add(d);
+    merged.preferredDates = [...dates].sort();
+    merged.invitationStatus = g.buyers.map(b => b.invitationStatus)
+      .sort((a, b) => (INVITE_RANK[b] || 0) - (INVITE_RANK[a] || 0))[0] || merged.invitationStatus;
+    const first = meetings.filter(m => m.buyerId === g.repId)
+      .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))[0];
+    if (first) { merged.confirmedDate = first.date; merged.confirmedTime = first.time; merged.confirmedExhibitorId = first.exhibitorId; }
+    mergedById.set(g.repId, merged);
+  }
+  const buyers = (state.buyers || [])
+    .filter(b => !remap.has(b.id))
+    .map(b => mergedById.get(b.id) || b);
+  return { ...state, buyers, meetings, invitationLog };
+}
+
 // 회사명 입력 + 드롭다운. 포커스 시 열림, 타이핑 실시간 필터(최대 8개), onMouseDown 선택
 function BuyerCompanyAutocomplete({ value, options, onType, onPick, disabled, placeholder }) {
   const [open, setOpen] = useState(false);
@@ -8889,6 +8955,29 @@ function RsvpTab({state, fullState, update, project, readOnly}){
   const [confirmData, setConfirmData] = useState(null); // 삭제 확인 모달
   const [sourceFilter, setSourceFilter] = useState('ALL'); // 출처별 필터: ALL | csv | meeting | manual | exhibitor | other
 
+  // 중복 바이어 합치기 — CANADA 전용 (MIPCOM·MIFA는 종료 행사라 대상 제외)
+  const MERGE_PROJECTS = ['CANADA'];
+  const [showMerge, setShowMerge] = useState(false);
+  const [merging, setMerging] = useState(false);
+  const [mergeMsg, setMergeMsg] = useState(null);
+  const mergePlan = useMemo(() => MERGE_PROJECTS.includes(subProject) ? planBuyerMerge(fullState, subProject) : [],
+    [fullState.buyers, fullState.meetings, subProject]);
+  const runMerge = async () => {
+    if (readOnly || !mergePlan.length) return;
+    setMerging(true); setMergeMsg(null);
+    const beforeMeetings = fullState.meetings.length;
+    const removed = mergePlan.reduce((n, g) => n + g.dupIds.length, 0);
+    try {
+      await createBackup(fullState, 'manual', `중복 바이어 합치기 직전 (${subProject})`);
+    } catch (e) {
+      setMergeMsg({ type: 'err', text: '백업에 실패해 합치기를 중단했습니다: ' + (e?.message || e) });
+      setMerging(false); return;
+    }
+    update(s => applyBuyerMerge(s, planBuyerMerge(s, subProject)));
+    setMergeMsg({ type: 'ok', text: `중복 바이어 ${removed}건을 합쳤습니다. 미팅 ${beforeMeetings}건은 그대로 유지됩니다. 합치기 직전 상태는 [백업 관리]에 저장되어 있습니다.` });
+    setShowMerge(false); setMerging(false);
+  };
+
   const deleteBuyer = (buyer) => {
     const meetingCount = fullState.meetings.filter(m => m.buyerId === buyer.id).length;
     setConfirmData({
@@ -9504,6 +9593,12 @@ function RsvpTab({state, fullState, update, project, readOnly}){
           <div className="mono" style={{fontSize:11, color:'var(--muted)', letterSpacing:'0.15em'}}>
             {respondedBuyers.length} BUYERS · {subProject}
           </div>
+          {!readOnly && mergePlan.length > 0 && (
+          <button className="btn btn-ghost" style={{padding:'7px 14px', fontSize:12, border:'1px solid #F59E0B', color:'#B45309'}}
+                  onClick={()=>{ setMergeMsg(null); setShowMerge(true); }}>
+            <Layers size={12}/>중복 바이어 합치기 ({mergePlan.reduce((n, g) => n + g.dupIds.length, 0)}건)
+          </button>
+          )}
           {!readOnly && (
           <button className="btn btn-primary" style={{padding:'7px 14px', fontSize:12}} onClick={()=>setShowRegister(true)}>
             <Plus size={12}/>RSVP 수동 등록
@@ -9511,6 +9606,41 @@ function RsvpTab({state, fullState, update, project, readOnly}){
           )}
         </div>
       </div>
+      {mergeMsg && (
+        <div style={{padding:'10px 14px', marginBottom:12, fontSize:12.5, borderRadius:'var(--radius-sm)',
+          background: mergeMsg.type === 'ok' ? '#ECFDF5' : '#FEF2F2', color: mergeMsg.type === 'ok' ? '#065F46' : '#991B1B',
+          border: `1px solid ${mergeMsg.type === 'ok' ? '#6EE7B7' : '#FCA5A5'}`}}>{mergeMsg.text}</div>
+      )}
+      {showMerge && (
+        <div className="modal-overlay" onClick={() => !merging && setShowMerge(false)}>
+          <div className="mice-modal" onClick={e => e.stopPropagation()} style={{maxWidth:620, width:'92%', padding:'24px 26px', maxHeight:'88vh', overflowY:'auto'}}>
+            <div className="mono" style={{fontSize:10, letterSpacing:'0.18em', color:'var(--muted)', fontWeight:700, marginBottom:6}}>MERGE DUPLICATES · {subProject}</div>
+            <h3 className="serif" style={{fontSize:20, margin:'0 0 8px'}}>중복 바이어 합치기</h3>
+            <div style={{fontSize:12.5, color:'var(--muted)', lineHeight:1.6, marginBottom:14}}>
+              같은 회사명의 {subProject} 바이어를 하나로 합치고, 연결된 미팅은 모두 대표 바이어로 옮깁니다. <b>미팅은 삭제되지 않습니다.</b> 실행 직전 상태는 [백업 관리]에 자동 백업됩니다.
+            </div>
+            <table style={{width:'100%', borderCollapse:'collapse', fontSize:12.5, marginBottom:16}}>
+              <thead><tr>
+                {['회사명', '바이어', '미팅', '합친 후'].map(h => <th key={h} style={{textAlign:'left', padding:'8px 10px', fontSize:11, color:'var(--muted)', borderBottom:'1px solid var(--line)'}}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {mergePlan.map(g => (
+                  <tr key={g.repId}>
+                    <td style={{padding:'8px 10px', borderBottom:'1px solid var(--line-2)', fontWeight:600}}>{g.name}</td>
+                    <td style={{padding:'8px 10px', borderBottom:'1px solid var(--line-2)'}} className="tabular">{g.buyers.length}건</td>
+                    <td style={{padding:'8px 10px', borderBottom:'1px solid var(--line-2)'}} className="tabular">{g.meetings}건</td>
+                    <td style={{padding:'8px 10px', borderBottom:'1px solid var(--line-2)', color:'#065F46'}}>바이어 1건 · 미팅 {g.meetings}건 유지</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{display:'flex', justifyContent:'flex-end', gap:8}}>
+              <button className="btn btn-ghost" onClick={() => setShowMerge(false)} disabled={merging}>취소</button>
+              <button className="btn btn-primary" onClick={runMerge} disabled={merging}>{merging ? '처리 중…' : '백업 후 합치기'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 행사 서브 스위처 */}
       <div style={{display:'flex', gap:8, marginBottom:14, flexWrap:'wrap'}}>
@@ -9656,8 +9786,15 @@ function RsvpTab({state, fullState, update, project, readOnly}){
                     <td>
                       {(() => {
                         const hopeDates = (b.preferredDates && b.preferredDates.length > 0) ? b.preferredDates : [];
-                        const confirmedDate = b.confirmedDate;
-                        const confirmedTime = b.confirmedTime;
+                        // 연결된 미팅이 여러 건이면(합친 바이어) 모두 표시, 없으면 기존 확정 일정 표시
+                        const linked = fullState.meetings.filter(m => m.buyerId === b.id)
+                          .sort((x, y) => `${x.date} ${x.time}`.localeCompare(`${y.date} ${y.time}`));
+                        const confirmedDate = linked[0]?.date || b.confirmedDate;
+                        const confirmedTime = linked[0]?.time || b.confirmedTime;
+                        const confirmedList = linked.length > 0
+                          ? linked.map(m => ({ key: m.id, text: `${m.date} · ${m.time}${meetingDuration(m) === 15 ? ' (15분)' : ''}`,
+                              ex: (fullState.exhibitors.find(e => e.id === m.exhibitorId)?.companyName || '') }))
+                          : (b.confirmedDate ? [{ key: 'c', text: `${b.confirmedDate}${b.confirmedTime ? ` · ${b.confirmedTime}` : ''}`, ex: '' }] : []);
 
                         if (hopeDates.length === 0 && !confirmedDate) {
                           return <span style={{color:'var(--muted-2)', fontSize:12}}>미지정</span>;
@@ -9666,16 +9803,21 @@ function RsvpTab({state, fullState, update, project, readOnly}){
                         return (
                           <div style={{display:'flex', flexDirection:'column', gap:3}}>
                             {/* 확정 일정 (있으면 강조 — 윗줄) */}
-                            {confirmedDate && (
-                              <div style={{display:'flex', alignItems:'center', gap:5, flexWrap:'wrap'}}>
-                                <span style={{fontSize:9, color:'#16A34A', fontWeight:700, letterSpacing:'0.06em'}}>확정</span>
-                                <span className="mono" style={{
-                                  fontSize:11, padding:'2px 7px',
-                                  background:'#DCFCE7', border:'1px solid #16A34A',
-                                  color:'#166534', borderRadius:4, fontWeight:600,
-                                }}>
-                                  {confirmedDate}{confirmedTime ? ` · ${confirmedTime}` : ''}
+                            {confirmedList.length > 0 && (
+                              <div style={{display:'flex', flexDirection:'column', gap:3}}>
+                                <span style={{fontSize:9, color:'#16A34A', fontWeight:700, letterSpacing:'0.06em'}}>
+                                  확정{confirmedList.length > 1 ? ` · ${confirmedList.length}건` : ''}
                                 </span>
+                                {confirmedList.map(c => (
+                                  <div key={c.key} style={{display:'flex', alignItems:'center', gap:5, flexWrap:'wrap'}}>
+                                    <span className="mono" style={{
+                                      fontSize:11, padding:'2px 7px',
+                                      background:'#DCFCE7', border:'1px solid #16A34A',
+                                      color:'#166534', borderRadius:4, fontWeight:600,
+                                    }}>{c.text}</span>
+                                    {confirmedList.length > 1 && c.ex && <span style={{fontSize:10.5, color:'var(--muted)'}}>{c.ex}</span>}
+                                  </div>
+                                ))}
                               </div>
                             )}
                             {/* 희망 일정 (배지로 — 아랫줄) */}
