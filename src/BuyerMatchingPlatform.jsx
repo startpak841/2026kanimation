@@ -976,6 +976,36 @@ function getSlotsForDate(config, date){
   return generateTimeSlots(r.start, r.end, config?.slotMinutes || 30);
 }
 
+// ============================ 미팅 번호(ID) ============================
+// 예전에는 "미팅 수 + 1"로 번호를 붙여, 미팅을 지운 뒤 추가하면 기존 번호와 겹쳤다.
+// 겹친 번호의 미팅은 하나를 수정·이동·삭제하면 같은 번호 미팅이 모두 함께 바뀐다.
+// → 항상 기존 MT-숫자 번호 중 최댓값 + 1을 쓴다.
+function nextMeetingId(meetings, offset = 0) {
+  let max = 0;
+  for (const m of (meetings || [])) {
+    const mm = /^MT-(\d+)$/.exec(String(m.id || ''));
+    if (mm) max = Math.max(max, parseInt(mm[1], 10));
+  }
+  return `MT-${String(max + 1 + offset).padStart(3, '0')}`;
+}
+// 이미 겹쳐 있는 번호 정리: 첫 미팅은 번호 유지, 나머지에 새 번호 부여 (미팅 내용은 그대로)
+function findDuplicateMeetingIds(meetings) {
+  const seen = new Set(), dup = new Set();
+  for (const m of (meetings || [])) { if (seen.has(m.id)) dup.add(m.id); seen.add(m.id); }
+  return [...dup];
+}
+function dedupeMeetingIds(state) {
+  const seen = new Set();
+  let added = 0;
+  const meetings = (state.meetings || []).map(m => {
+    if (!seen.has(m.id)) { seen.add(m.id); return m; }
+    const id = nextMeetingId(state.meetings, added++);
+    seen.add(id);
+    return { ...m, id };
+  });
+  return added ? { ...state, meetings } : state;
+}
+
 // ============================ 미팅 소요시간 (15분 / 30분) ============================
 // CANADA 전용: 표의 칸은 30분 그대로 두고, 미팅마다 소요시간(기본 30분, 15분 선택)을 저장한다.
 // 15분 미팅은 시작 시간을 15분 단위(:15/:45)로 고를 수 있고, 해당 시간이 속한 30분 칸 안에 표시된다.
@@ -4301,6 +4331,18 @@ function AdminConsole({ state, update, viewerMode, onLogout, onProxyEnter }) {
     };
   }, [state, project]);
 
+  // [정리] 겹친 미팅 번호가 있으면 접속 시 1회 자동 정리 (직전 상태 백업 후, 번호만 새로 부여)
+  useEffect(() => {
+    if (isKoccaViewer) return;
+    const dups = findDuplicateMeetingIds(state.meetings);
+    if (!dups.length) return;
+    (async () => {
+      try { await createBackup(state, 'manual', `미팅 번호 중복 정리 직전 (${dups.length}개 번호)`); }
+      catch (e) { console.warn('[dedupe] backup failed, skip', e); return; }
+      update(s => dedupeMeetingIds(s));
+    })();
+  }, [isKoccaViewer]);
+
   // [백업] 관리자(편집 권한) 접속 중 자동 백업 — 마지막 자동 백업이 30분 지났으면 새로 저장
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -5793,7 +5835,7 @@ function InviteTab({state, update}){
           const slot = slots.find(t => !used.has(t)) || '16:30';
           const tableNum = String(s.meetings.length + 1).padStart(2,'0');
           newMeetings = [...s.meetings, {
-            id: `MT-${String(s.meetings.length+1).padStart(3,'0')}`,
+            id: nextMeetingId(s.meetings),
             exhibitorId: best.ex.id,
             buyerId: buyerId,
             date: dates[0],
@@ -6337,6 +6379,12 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
       let buyerId = modalData.buyerId;
       // 드롭다운을 쓰지 않고 직접 타이핑해도, 같은 이름(공백·대소문자 무시)의 등록 바이어가 있으면 자동 연결 (CANADA)
       let autoLinked = false;
+      // 기존 미팅에서 회사명을 다른 이름으로 바꾼 경우: 연결된(공유) 바이어 이름을 바꾸지 않고 이 미팅만 다른 바이어로 교체
+      // (같은 이름 바이어가 있으면 그 바이어에 연결, 없으면 새 바이어 생성) — 바이어 공유 구조는 그대로
+      if (buyerId && autocompleteOn && modalData._linkSource === 'existing') {
+        const cur = s.buyers.find(b => b.id === buyerId);
+        if (cur && normBuyerName(cur.companyName) !== normBuyerName(modalData._companyName)) buyerId = null;
+      }
       if (!buyerId && autocompleteOn) {
         const hit = buildBuyerOptions(s.buyers, subProject).find(o => o.key === normBuyerName(modalData._companyName));
         if (hit) { buyerId = hit.buyerId; autoLinked = true; }
@@ -6403,7 +6451,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
 
       if (modalMode === 'new') {
         const newMeeting = {
-          id: `MT-${String(s.meetings.length + 1).padStart(3,'0')}`,
+          id: nextMeetingId(s.meetings),
           ...meetingFields,
           source: arrangeEnabled ? sourceFromArrange : 'admin_manual',
           createdBy: 'admin',
@@ -9454,7 +9502,7 @@ function RsvpTab({state, fullState, update, project, readOnly}){
     const time = slots.find(t => !used.has(t)) || '18:30';
     const tableNum = String(fullState.meetings.length + 1).padStart(2, '0');
     const newMeeting = {
-      id: `MT-${String(fullState.meetings.length + 1).padStart(3,'0')}`,
+      id: nextMeetingId(fullState.meetings),
       exhibitorId: best.ex.id,
       buyerId: buyer.id,
       date, time,
