@@ -5,7 +5,7 @@ import {
   Globe, Tag, TrendingUp, AlertCircle, FileSpreadsheet, Send, Filter,
   BarChart3, Clock, MapPin, Award, ArrowUpRight, Plus, Trash2, Eye,
   Film, FileText, ClipboardList, Languages, Plane, Home, MessageSquare, User2,
-  ClipboardCheck, Link2, Copy, ExternalLink, Lock, Layers
+  ClipboardCheck, Link2, Copy, ExternalLink, Lock, Layers, Download
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -988,6 +988,34 @@ function nextMeetingId(meetings, offset = 0) {
   }
   return `MT-${String(max + 1 + offset).padStart(3, '0')}`;
 }
+// 새 바이어 번호: 지금까지 쓴 가장 큰 번호 + 1 (전 행사 공통 일련번호).
+// 예전엔 '바이어 수 + 1'로 매겨서, 바이어를 합치거나 지운 뒤에는 이미 있는 번호와 겹칠 수 있었음.
+// ============================ 참가사 접속 기록 (CANADA 전용) ============================
+// 메인 상태(kags_platform_state_v6)와 따로 저장 — 참가사 로그인 시 관리자가 편집 중인 스케줄을 덮어쓰지 않도록.
+// 형식: { [exhibitorId]: { lastAt: ISO, firstAt: ISO, count: n } }. 관리자 대리 입력은 기록하지 않음.
+const LOGIN_LOG_KEY = 'kags_login_log';
+const LOGIN_LOG_PROJECTS = ['CANADA'];
+async function readLoginLog() {
+  try { const r = await window.storage.get(LOGIN_LOG_KEY); return r && r.value ? (JSON.parse(r.value) || {}) : {}; } catch { return {}; }
+}
+async function recordExhibitorVisit(exhibitorId) {
+  try {
+    const log = await readLoginLog();
+    const now = new Date().toISOString();
+    const prev = log[exhibitorId] || {};
+    log[exhibitorId] = { lastAt: now, firstAt: prev.firstAt || now, count: (prev.count || 0) + 1 };
+    await window.storage.set(LOGIN_LOG_KEY, JSON.stringify(log));
+  } catch {}
+}
+
+// 공유 바이어 보호(참가사 화면 수정) 적용 행사
+const SHARED_BUYER_GUARD_PROJECTS = ['CANADA'];
+function nextBuyerId(buyers, project, offset = 0) {
+  let max = 0;
+  for (const b of (buyers || [])) { const mm = /^BU-(?:[A-Za-z]+-)?(\d+)$/.exec(String(b.id || '')); if (mm) max = Math.max(max, parseInt(mm[1], 10)); }
+  const n = String(max + 1 + offset).padStart(4, '0');
+  return project ? `BU-${project}-${n}` : `BU-${n}`;
+}
 // 이미 겹쳐 있는 번호 정리: 첫 미팅은 번호 유지, 나머지에 새 번호 부여 (미팅 내용은 그대로)
 function findDuplicateMeetingIds(meetings) {
   const seen = new Set(), dup = new Set();
@@ -1026,6 +1054,179 @@ function addMinutesToTime(time, mins) {
 function getQuarterSlotsForDate(config, date) {
   const r = getTimeRangeForDate(config, date);
   return generateTimeSlots(r.start, r.end, 15);
+}
+
+// ============================ 비즈니스 미팅 스케줄 엑셀 내보내기 ============================
+// CANADA 전용: 일자별 시트(행=30분 칸, 열=참가사 부스 순) + 요약 시트. KOMICS USA 스케줄표 양식 기준.
+// SheetJS 무료판은 서식(배경·테두리)을 쓰지 못하므로 xlsx 파일을 직접 조립한다(XLSX.CFB의 zip 기능 사용).
+const SCHEDULE_EXPORT_PROJECTS = ['CANADA'];
+const MEETING_EXCLUDED_STATUSES = ['cancelled', 'canceled', 'declined', 'rejected'];
+
+function timeLabel12(t) {
+  const [h, m] = String(t).split(':').map(Number);
+  const ap = h < 12 ? 'AM' : 'PM';
+  const hh = h % 12 === 0 ? 12 : h % 12;
+  return m ? `${hh}:${String(m).padStart(2, '0')}${ap}` : `${hh}${ap}`;
+}
+function xlColName(i) { let s = ''; i += 1; while (i > 0) { const r = (i - 1) % 26; s = String.fromCharCode(65 + r) + s; i = Math.floor((i - 1) / 26); } return s; }
+function xlEsc(v) { return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ''); }
+
+// 미팅 1건 → 셀 문구 (바이어 회사명 + 짧은 메모 + 15분 시간 + 미확정 표시)
+function meetingCellText(m, buyer) {
+  let s = buyer?.companyName || '(바이어 미지정)';
+  const note = String(m.notes || '').trim();
+  if (note && note.length <= 12) s += `(${note})`;
+  if (meetingDuration(m) === 15) s += `\n(${m.time}-${addMinutesToTime(m.time, 15)})`;
+  if (m.status === 'tentative') s += ' [TBC]';
+  return s;
+}
+
+function buildScheduleWorkbookFiles({ project, config, exhibitors, meetings, buyers }) {
+  const buyerOf = id => buyers.find(b => b.id === id);
+  const active = meetings.filter(m => !MEETING_EXCLUDED_STATUSES.includes(String(m.status || '').toLowerCase()));
+  const exName = e => e.companyNameEn || e.companyName || e.id;
+  const dates = config.dates || [];
+  const dateShort = d => { const dt = new Date(d + 'T00:00:00'); return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };
+
+  // 서식 번호: 1 제목 · 2 헤더 · 3 부스번호 · 4 시간열 · 5 본문 · 6 합계 · 7 본문(미팅 있음)
+  const S = { title: 1, head: 2, booth: 3, time: 4, body: 5, total: 6, admin: 7, exhibitor: 8 };
+  // 미팅 칸 색: 사무국(운영사) 편성 = 노랑, 참가사 직접 등록 = 연청록, 그 외 = 색 없음 (화면의 출처 색과 맞춤)
+  const cellStyleOf = ms => ms.some(m => m.source === 'admin_manual' || m.source === 'admin_added') ? S.admin : ms.some(m => m.source === 'exhibitor_self') ? S.exhibitor : S.body;
+  const cellXml = (ref, v, s) => {
+    if (v === null || v === undefined || v === '') return `<c r="${ref}" s="${s}"/>`;
+    if (typeof v === 'number') return `<c r="${ref}" s="${s}"><v>${v}</v></c>`;
+    if (typeof v === 'object' && v.f) return `<c r="${ref}" s="${s}"><f>${xlEsc(v.f)}</f><v>${v.v}</v></c>`;
+    return `<c r="${ref}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${xlEsc(v)}</t></is></c>`;
+  };
+  const sheetXml = ({ rows, widths, merges, heights, freeze }) => {
+    const cols = widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('');
+    const body = rows.map((r, ri) => {
+      const ht = heights[ri] ? ` ht="${heights[ri]}" customHeight="1"` : '';
+      return `<row r="${ri + 1}"${ht}>` + r.map((c, ci) => c ? cellXml(xlColName(ci) + (ri + 1), c.v, c.s) : '').join('') + '</row>';
+    }).join('');
+    const pane = freeze ? `<pane xSplit="${freeze[0]}" ySplit="${freeze[1]}" topLeftCell="${xlColName(freeze[0])}${freeze[1] + 1}" activePane="bottomRight" state="frozen"/>` : '';
+    const mg = merges.length ? `<mergeCells count="${merges.length}">${merges.map(m => `<mergeCell ref="${m}"/>`).join('')}</mergeCells>` : '';
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetViews><sheetView workbookViewId="0">${pane}</sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols>${cols}</cols><sheetData>${body}</sheetData>${mg}<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/><pageSetup orientation="landscape" paperSize="9" fitToWidth="1" fitToHeight="0"/></worksheet>`;
+  };
+
+  const sheets = [];
+  const perDay = {}; // exId → {date: count}
+
+  // ── 일자별 시트
+  for (const d of dates) {
+    const slots = getSlotsForDate(config, d.date);
+    const n = exhibitors.length;
+    const lastCol = xlColName(n);
+    const rows = [], heights = [];
+    rows.push([{ v: '', s: S.title }, { v: `${config.label} · Business Meeting Schedule · ${dateShort(d.date)} (${String(d.dow || '').split('·').pop().trim()})`, s: S.title }]);
+    heights.push(48);
+    rows.push([{ v: 'Time / Company', s: S.head }, ...exhibitors.map(e => ({ v: exName(e), s: S.head }))]);
+    heights.push(36);
+    rows.push([{ v: 'Booth No.', s: S.booth }, ...exhibitors.map((e, i) => ({ v: i + 1, s: S.booth }))]);
+    heights.push(22);
+    const colCount = exhibitors.map(() => 0);
+    for (const t of slots) {
+      const end = addMinutesToTime(t, config.slotMinutes || 30);
+      const blocked = getBlockedSlot(project, d.date, t);
+      const cells = exhibitors.map((e, i) => {
+        const ms = active.filter(m => m.exhibitorId === e.id && m.date === d.date && slotKeyOf(m.time) === t)
+          .sort((a, b) => String(a.time).localeCompare(String(b.time)));
+        colCount[i] += ms.length;
+        if (!ms.length && blocked) return { v: blocked.title, s: S.total };
+        return { v: ms.map(m => meetingCellText(m, buyerOf(m.buyerId))).join('\n'), s: ms.length ? cellStyleOf(ms) : S.body };
+      });
+      rows.push([{ v: `${timeLabel12(t)}-${timeLabel12(end)}`, s: S.time }, ...cells]);
+      heights.push(34);
+    }
+    const last = 3 + slots.length;
+    const sum = colCount.reduce((a, b) => a + b, 0);
+    // 합계는 맨 아래 줄 하나만 (참가사별 건수, 전체 건수는 맨 앞 칸에 함께 표시)
+    const totalRow = [{ v: `Total (${sum})`, s: S.total }, ...colCount.map(c => ({ v: c, s: S.total }))];   // 15분 미팅 2건이 한 칸에 있을 수 있어 수식 대신 실제 건수
+    rows.push(totalRow); heights.push(24);
+    exhibitors.forEach((e, i) => { (perDay[e.id] = perDay[e.id] || {})[d.date] = colCount[i]; });
+    sheets.push({
+      name: `${dateShort(d.date)}`,
+      xml: sheetXml({ rows, heights, widths: [16, ...exhibitors.map(() => 26)], merges: [`B1:${lastCol}1`], freeze: [1, 3] }),
+    });
+  }
+
+  // ── 요약 시트 (부스번호·회사명·Total·일자별 건수)
+  {
+    const rows = [], heights = [];
+    const ncol = 3 + dates.length;
+    rows.push([{ v: `${config.label}\nBusiness Meeting Summary`, s: S.title }]); heights.push(52);
+    rows.push([{ v: 'Booth No.', s: S.head }, { v: 'Company Name', s: S.head }, { v: 'Total', s: S.head }, ...dates.map(d => ({ v: dateShort(d.date), s: S.head }))]); heights.push(26);
+    exhibitors.forEach((e, i) => {
+      const per = dates.map(d => perDay[e.id]?.[d.date] || 0);
+      const r = i + 3;
+      rows.push([{ v: i + 1, s: S.booth }, { v: exName(e), s: S.body }, { v: { f: `SUM(D${r}:${xlColName(ncol - 1)}${r})`, v: per.reduce((a, b) => a + b, 0) }, s: S.total }, ...per.map(c => ({ v: c, s: S.body }))]);
+      heights.push(24);
+    });
+    const r0 = 3, r1 = 2 + exhibitors.length;
+    rows.push([{ v: 'Total', s: S.total }, { v: '', s: S.total }, ...Array.from({ length: 1 + dates.length }, (_, k) => {
+      const col = xlColName(2 + k);
+      const v = k === 0 ? exhibitors.reduce((a, e) => a + dates.reduce((x, d) => x + (perDay[e.id]?.[d.date] || 0), 0), 0)
+                        : exhibitors.reduce((a, e) => a + (perDay[e.id]?.[dates[k - 1].date] || 0), 0);
+      return { v: { f: `SUM(${col}${r0}:${col}${r1})`, v }, s: S.total };
+    })]); heights.push(24);
+    rows.push([]); rows.push([{ v: `Exported ${new Date().toLocaleString('ko-KR')} · 노란 칸 = 운영사무국 편성 · 취소된 미팅 제외 · [TBC] = 미확정`, s: 0 }]);
+    sheets.unshift({ name: 'Summary', xml: sheetXml({ rows, heights, widths: [11, 34, 10, ...dates.map(() => 10)], merges: [`A1:${xlColName(ncol - 1)}1`], freeze: [0, 2] }) });
+  }
+
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="6"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="15"/><name val="Arial"/></font><font><b/><sz val="11"/><name val="Arial"/></font><font><b/><sz val="12"/><name val="Arial"/></font><font><sz val="11"/><name val="Arial"/></font><font><b/><sz val="11"/><name val="Arial"/></font></fonts>
+<fills count="7"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFCFE2F3"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFCCCCCC"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF3F3F3"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDDF4F8"/><bgColor indexed="64"/></patternFill></fill></fills>
+<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FF999999"/></left><right style="thin"><color rgb="FF999999"/></right><top style="thin"><color rgb="FF999999"/></top><bottom style="thin"><color rgb="FF999999"/></bottom><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="9">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="3" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="4" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="4" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="5" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="4" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="4" fillId="6" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+</cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+  const files = {
+    '[Content_Types].xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((s, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>`,
+    '_rels/.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
+    'xl/workbook.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView activeTab="${sheets.length > 1 ? 1 : 0}"/></bookViews><sheets>${sheets.map((s, i) => `<sheet name="${xlEsc(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>`,
+    'xl/_rels/workbook.xml.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((s, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
+    'xl/styles.xml': styles,
+  };
+  sheets.forEach((s, i) => { files[`xl/worksheets/sheet${i + 1}.xml`] = s.xml; });
+  return files;
+}
+
+function zipFiles(files) {
+  const CFB = XLSX.CFB;
+  const zip = CFB.utils.cfb_new();
+  const enc = new TextEncoder();
+  for (const [path, text] of Object.entries(files)) CFB.utils.cfb_add(zip, '/' + path, enc.encode(text));
+  return CFB.write(zip, { type: 'array', fileType: 'zip', compression: true });
+}
+
+function exportScheduleXlsx({ project, config, exhibitors, meetings, buyers }) {
+  const files = buildScheduleWorkbookFiles({ project, config, exhibitors, meetings, buyers });
+  const data = zipFiles(files);
+  const blob = new Blob([data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `KAnimation_${project}_2026_Business_Meeting_Schedule_${stamp}.xlsx`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 
 // ============================ 회사명 → 분야 자동 추정 ============================
@@ -2446,6 +2647,13 @@ function RoleCard({icon, title, en, desc, onClick, accent}){
 function ExhibitorPortal({ state, update, userId, onLogout, proxyAdmin }) {
   const me = state.exhibitors.find(e => e.id === userId);
   const [tab, setTab] = useState('profile');
+  // 접속 기록 (CANADA 참가사 본인 접속만, 관리자 대리 입력 제외) — 같은 브라우저 탭에서는 1회만
+  useEffect(() => {
+    if (proxyAdmin || !me || !LOGIN_LOG_PROJECTS.includes(me.project)) return;
+    const k = 'kags_visit_recorded_' + me.id;
+    try { if (sessionStorage.getItem(k)) return; sessionStorage.setItem(k, '1'); } catch {}
+    recordExhibitorVisit(me.id);
+  }, [me?.id, proxyAdmin]);
 
   const myMeetings = state.meetings.filter(m => m.exhibitorId === userId);
   const ipCount = (me.ips || []).length;
@@ -3840,8 +4048,7 @@ function MyMeetingsTab({state, update, me}){
 
     update(s => {
       // 항상 신규 바이어 생성 (수동 입력 방식)
-      const seq = s.buyers.length + 1;
-      const buyerId = `BU-${project}-${String(seq).padStart(4,'0')}`;
+      const buyerId = nextBuyerId(s.buyers, project);
       const guess = guessBuyerField(f.companyName);
       const size = guessBuyerSize(f.companyName);
       const newBuyer = {
@@ -3893,6 +4100,37 @@ function MyMeetingsTab({state, update, me}){
     const mid = slotAction.meeting.id;
     const buyerId = slotAction.meeting.buyerId;
     if (!(f.companyName || '').trim()) { alert('회사명을 입력해주세요.'); return; }
+    // CANADA: 바이어는 여러 참가사가 함께 쓰는 공유 레코드 → 참가사 화면에서 고친 내용이 다른 참가사 미팅까지 바꾸지 않게 한다.
+    //  · 회사명이 바뀌면: 같은 이름의 등록 바이어가 있으면 그 바이어로, 없으면 새 바이어를 만들어 이 미팅만 연결
+    //  · 회사명이 같으면: 빈 칸은 기존 값 유지(지우지 않음), 입력한 값만 반영
+    if (SHARED_BUYER_GUARD_PROJECTS.includes(project)) {
+      update(s => {
+        const cur = s.buyers.find(b => b.id === buyerId);
+        const keep = (v, old) => String(v || '').trim() ? v : old;
+        if (cur && normBuyerName(cur.companyName) === normBuyerName(f.companyName)) {
+          return { ...s, buyers: s.buyers.map(b => b.id === buyerId ? { ...b,
+            contactName: keep(f.contactName, b.contactName), position: keep(f.position, b.position),
+            email: keep(f.email, b.email), phone: keep(f.phone, b.phone) } : b) };
+        }
+        const same = s.buyers.find(b => b.project === project && normBuyerName(b.companyName) === normBuyerName(f.companyName));
+        let buyers = s.buyers, newId;
+        if (same) {
+          newId = same.id;
+          buyers = s.buyers.map(b => b.id === same.id ? { ...b,
+            contactName: keep(f.contactName, b.contactName), position: keep(f.position, b.position),
+            email: keep(f.email, b.email), phone: keep(f.phone, b.phone) } : b);
+        } else {
+          newId = nextBuyerId(s.buyers, project);
+          buyers = [...s.buyers, { ...(cur || {}), id: newId, project,
+            companyName: f.companyName.trim(), contactName: f.contactName, position: f.position, email: f.email, phone: f.phone,
+            interestedProducts: '', source: 'exhibitor_added',
+            confirmedDate: slotAction.meeting.date, confirmedTime: slotAction.meeting.time, confirmedExhibitorId: slotAction.meeting.exhibitorId }];
+        }
+        return { ...s, buyers, meetings: s.meetings.map(m => m.id === mid ? { ...m, buyerId: newId } : m) };
+      });
+      closeAction();
+      return;
+    }
     update(s => ({
       ...s,
       // 바이어 정보(회사명 포함) 업데이트
@@ -4970,9 +5208,7 @@ function BuyersTab({state, fullState, update, project, readOnly}){
         // 프로젝트 자동 할당 (CSV에 명시 안 됐거나 인식 불가)
         if (!o.project && project && project !== 'ALL') o.project = project;
         if (!o.id) {
-          const prefix = o.project ? `BU-${o.project}` : 'BU';
-          const base = fullState.buyers.length;
-          o.id = `${prefix}-${String(base + idx + 1).padStart(4,'0')}`;
+          o.id = nextBuyerId(fullState.buyers, o.project, idx);
         }
         if (!o.invitationStatus) o.invitationStatus = null;
         if (!o.preferredDates) o.preferredDates = [];
@@ -5575,6 +5811,14 @@ function Modal({title, children, onClose}){
 
 // ---------------- EXHIBITORS MANAGEMENT ----------------
 function ExhibitorsTab({state, update, readOnly, onProxy}){
+  const [loginLog, setLoginLog] = useState({});
+  useEffect(() => {
+    let alive = true;
+    const load = () => readLoginLog().then(l => { if (alive) setLoginLog(l); });
+    load();
+    const t = setInterval(load, 30000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
   const [detailId, setDetailId] = useState(null);
   const [editId, setEditId] = useState(null);
   const [search, setSearch] = useState('');
@@ -5621,6 +5865,8 @@ function ExhibitorsTab({state, update, readOnly, onProxy}){
     const tb = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
     return tb - ta;
   });
+  // '마지막 접속' 칸은 CANADA 참가사가 목록에 있을 때만 표시 (MIPCOM·MIFA만 볼 때는 기존 표 그대로)
+  const showLoginCol = sorted.some(e => LOGIN_LOG_PROJECTS.includes(e.project));
 
   return (
     <div className="fade-in">
@@ -5674,6 +5920,7 @@ function ExhibitorsTab({state, update, readOnly, onProxy}){
                 <th style={{width:180}}>담당자</th>
                 <th style={{width:260}}>제출 현황</th>
                 <th style={{width:120}}>최근 수정</th>
+                {showLoginCol && <th style={{width:130}}>마지막 접속</th>}
                 <th style={{width:90}}>계정</th>
                 <th style={{width:90}}>액션</th>
               </tr>
@@ -5731,6 +5978,18 @@ function ExhibitorsTab({state, update, readOnly, onProxy}){
                         </div>
                       : <span style={{color:'var(--muted-2)'}}>—</span>}
                   </td>
+                  {showLoginCol && (
+                    <td style={{fontSize:11.5}}>
+                      {LOGIN_LOG_PROJECTS.includes(e.project) && loginLog[e.id]?.lastAt
+                        ? <div title={`첫 접속 ${new Date(loginLog[e.id].firstAt).toLocaleString('ko-KR')}`}>
+                            <div style={{fontWeight:500, color:'var(--ink-2)'}}>{formatRelative(loginLog[e.id].lastAt)}</div>
+                            <div className="mono" style={{fontSize:9.5, color:'var(--muted-2)', marginTop:1}}>
+                              {new Date(loginLog[e.id].lastAt).toLocaleString('ko-KR', {month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit'})} · {loginLog[e.id].count}회
+                            </div>
+                          </div>
+                        : <span style={{color:'var(--muted-2)'}}>{LOGIN_LOG_PROJECTS.includes(e.project) ? '기록 없음' : '—'}</span>}
+                    </td>
+                  )}
                   <td><span className="chip mono" style={{fontSize:10}}>{e.loginId}</span></td>
                   <td>
                     <button className="btn btn-ghost" style={{padding:'5px 10px', fontSize:11.5}} onClick={()=>setDetailId(e.id)}>
@@ -5740,7 +5999,7 @@ function ExhibitorsTab({state, update, readOnly, onProxy}){
                 </tr>
               );})}
               {sorted.length === 0 && (
-                <tr><td colSpan={7} style={{textAlign:'center', padding:40, color:'var(--muted)'}}>검색 결과가 없습니다.</td></tr>
+                <tr><td colSpan={showLoginCol ? 8 : 7} style={{textAlign:'center', padding:40, color:'var(--muted)'}}>검색 결과가 없습니다.</td></tr>
               )}
             </tbody>
           </table>
@@ -6394,8 +6653,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
 
       if (!buyerId) {
         // 등록 바이어를 고르지 않은 경우에만 신규 바이어 생성 (새 미팅·수정 공통)
-        const seq = s.buyers.length + 1;
-        buyerId = `BU-${subProject}-${String(seq).padStart(4,'0')}`;
+        buyerId = nextBuyerId(s.buyers, subProject);
         const guess = guessBuyerField(modalData._companyName);
         const size = guessBuyerSize(modalData._companyName);
         const newBuyer = {
@@ -6613,7 +6871,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
         </div>
       ) : (
         <>
-          <div style={{display:'flex', gap:6, marginBottom:14, overflowX:'auto', paddingBottom:2}}>
+          <div style={{display:'flex', gap:6, marginBottom:14, overflowX:'auto', paddingBottom:2, alignItems:'stretch'}}>
             {config.dates.map(d => {
               const active = selectedDate === d.date;
               const cntOnDay = allMeetingsInProject.filter(m => m.date === d.date).length;
@@ -6632,6 +6890,22 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                 </button>
               );
             })}
+            {SCHEDULE_EXPORT_PROJECTS.includes(subProject) && exhibitorsInProject.length > 0 && (
+              <button
+                onClick={() => {
+                  try { exportScheduleXlsx({ project: subProject, config, exhibitors: exhibitorsInProject, meetings: allMeetingsInProject, buyers: fullState.buyers }); }
+                  catch (e) { alert('엑셀 파일을 만들지 못했습니다.\n' + (e?.message || e)); }
+                }}
+                title="전체 일정(일자별 시트 + 요약)을 엑셀 파일로 내려받습니다"
+                style={{
+                  marginLeft:'auto', padding:'10px 16px', borderRadius:'var(--radius-sm)', cursor:'pointer',
+                  border:'1px solid #16A34A', background:'#F0FDF4', color:'#166534',
+                  fontFamily:'inherit', fontSize:13, fontWeight:600, whiteSpace:'nowrap',
+                  display:'inline-flex', alignItems:'center', gap:8,
+                }}>
+                <Download size={15}/> 스케줄 엑셀 내려받기
+              </button>
+            )}
           </div>
 
           {exhibitorsInProject.length === 0 ? (
@@ -9297,8 +9571,7 @@ function RsvpTab({state, fullState, update, project, readOnly}){
           buyerId = existing.id;
           updated++;
         } else {
-          const seq = buyers.length + 1;
-          buyerId = `BU-${buyerProject}-${String(seq).padStart(4,'0')}`;
+          buyerId = nextBuyerId(buyers, buyerProject);
           buyers.push({ id: buyerId, ...nb });
           added++;
         }
@@ -9984,7 +10257,7 @@ function RsvpRegisterModal({fullState, defaultProject, onClose, onSubmit}){
 
   const submit = () => {
     if (!form.companyName.trim()) { alert('회사명은 필수 입력입니다.'); return; }
-    const id = `BU-${form.project}-${String(fullState.buyers.length + 1).padStart(4,'0')}`;
+    const id = nextBuyerId(fullState.buyers, form.project);
     const buyer = {
       ...form,
       id,
