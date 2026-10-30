@@ -862,7 +862,9 @@ const EVENT_CONFIG = {
     label: '2026 K-Animation Global Showcase in Canada',
     // 일자별 운영시간이 다른 행사 — date 항목의 timeStart/timeEnd가 있으면 그것이 우선 적용됨
     dates: [
-      { date: '2026-11-03', dow: '화 · Tue', timeStart: '13:30', timeEnd: '18:00' },
+      { date: '2026-11-03', dow: '화 · Tue', timeStart: '13:30', timeEnd: '18:00',
+        // 미팅 시작 전 안내 줄 (시간 표기 없음, 미팅 편성 칸 아님) — 화면·엑셀 표 맨 위에 한 줄로 표시
+        preRows: ['Networking Lunch'] },
       { date: '2026-11-04', dow: '수 · Wed', timeStart: '10:00', timeEnd: '16:00' },
     ],
     timeStart: '10:00',
@@ -1089,7 +1091,7 @@ function buildScheduleWorkbookFiles({ project, config, exhibitors, meetings, buy
   const dateShort = d => { const dt = new Date(d + 'T00:00:00'); return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };
 
   // 서식 번호: 1 제목 · 2 헤더 · 3 부스번호 · 4 시간열 · 5 본문 · 6 합계 · 7 본문(미팅 있음)
-  const S = { title: 1, head: 2, booth: 3, time: 4, body: 5, total: 6, admin: 7, exhibitor: 8 };
+  const S = { title: 1, head: 2, booth: 3, time: 4, body: 5, total: 6, admin: 7, exhibitor: 8, lunch: 9 };
   // 미팅 칸 색: 사무국(운영사) 편성 = 노랑, 참가사 직접 등록 = 연청록, 그 외 = 색 없음 (화면의 출처 색과 맞춤)
   const cellStyleOf = ms => ms.some(m => m.source === 'admin_manual' || m.source === 'admin_added') ? S.admin : ms.some(m => m.source === 'exhibitor_self') ? S.exhibitor : S.body;
   const cellXml = (ref, v, s) => {
@@ -1125,6 +1127,12 @@ function buildScheduleWorkbookFiles({ project, config, exhibitors, meetings, buy
     heights.push(36);
     rows.push([{ v: 'Booth No.', s: S.booth }, ...exhibitors.map((e, i) => ({ v: i + 1, s: S.booth }))]);
     heights.push(22);
+    const merges = [`B1:${lastCol}1`];
+    for (const label of (d.preRows || [])) {   // 시간 없는 안내 줄 (예: Networking Lunch) — 참가사 칸 전체 병합
+      rows.push([{ v: '', s: S.time }, { v: label, s: S.lunch }, ...exhibitors.slice(1).map(() => ({ v: '', s: S.lunch }))]);
+      merges.push(`B${rows.length}:${lastCol}${rows.length}`);
+      heights.push(30);
+    }
     const colCount = exhibitors.map(() => 0);
     for (const t of slots) {
       const end = addMinutesToTime(t, config.slotMinutes || 30);
@@ -1147,7 +1155,7 @@ function buildScheduleWorkbookFiles({ project, config, exhibitors, meetings, buy
     exhibitors.forEach((e, i) => { (perDay[e.id] = perDay[e.id] || {})[d.date] = colCount[i]; });
     sheets.push({
       name: `${dateShort(d.date)}`,
-      xml: sheetXml({ rows, heights, widths: [16, ...exhibitors.map(() => 26)], merges: [`B1:${lastCol}1`], freeze: [1, 3] }),
+      xml: sheetXml({ rows, heights, widths: [16, ...exhibitors.map(() => 26)], merges, freeze: [1, 3] }),
     });
   }
 
@@ -1177,10 +1185,10 @@ function buildScheduleWorkbookFiles({ project, config, exhibitors, meetings, buy
   const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <fonts count="6"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="15"/><name val="Arial"/></font><font><b/><sz val="11"/><name val="Arial"/></font><font><b/><sz val="12"/><name val="Arial"/></font><font><sz val="11"/><name val="Arial"/></font><font><b/><sz val="11"/><name val="Arial"/></font></fonts>
-<fills count="7"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFCFE2F3"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFCCCCCC"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF3F3F3"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDDF4F8"/><bgColor indexed="64"/></patternFill></fill></fills>
+<fills count="8"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFCFE2F3"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFCCCCCC"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF3F3F3"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDDF4F8"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFD9D2E9"/><bgColor indexed="64"/></patternFill></fill></fills>
 <borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FF999999"/></left><right style="thin"><color rgb="FF999999"/></right><top style="thin"><color rgb="FF999999"/></top><bottom style="thin"><color rgb="FF999999"/></bottom><diagonal/></border></borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="9">
+<cellXfs count="10">
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
 <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
 <xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
@@ -1190,6 +1198,7 @@ function buildScheduleWorkbookFiles({ project, config, exhibitors, meetings, buy
 <xf numFmtId="0" fontId="5" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
 <xf numFmtId="0" fontId="4" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
 <xf numFmtId="0" fontId="4" fillId="6" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="5" fillId="7" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
 </cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
@@ -6606,7 +6615,9 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
   // 자동완성: 회사명 타이핑 — 드롭다운으로 고른 바이어였다면 연결 해제(새 바이어로 처리)
   const typeBuyerCompany = (text) => {
     setModalData(d => d._linkSource === 'pick'
-      ? { ...d, _companyName: text, buyerId: null, _linkSource: null, _country: '', _categories: [] }
+      ? { ...d, _companyName: text, buyerId: null, _linkSource: null, _country: '', _categories: [],
+          // 선택 해제 시 자동으로 넣었던 회사소개 메모도 비움 (직접 고친 메모는 유지)
+          ...(d._autoNotes && d.notes === d._autoNotes ? { notes: '', _autoNotes: '' } : {}) }
       : { ...d, _companyName: text });
   };
   // 자동완성: 바이어 선택 — buyerId(FK)와 연락 정보를 폼에 세팅 (병합된 값 사용)
@@ -6623,6 +6634,12 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
       _phone: b.phone || '',
       _country: b.country || '',
       _categories: buyerCategoryLabels(b),
+      // 미팅 메모: 바이어 DB '관심 품목 / 주요 사업'(회사소개)을 자동 입력. 직접 쓴 메모가 있으면 덮어쓰지 않음
+      ...((() => {
+        const intro = String(b.interestedProducts || '').trim();
+        const blankOrAuto = !String(d.notes || '').trim() || (d._autoNotes && d.notes === d._autoNotes);
+        return intro && blankOrAuto ? { notes: intro, _autoNotes: intro } : {};
+      })()),
     }));
   };
 
@@ -6934,6 +6951,14 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                   </tr>
                 </thead>
                 <tbody>
+                  {((config.dates.find(d => d.date === selectedDate) || {}).preRows || []).map(label => (
+                    <tr key={'pre-' + label}>
+                      <td style={{position:'sticky', left:0, background:'#EDE9F6', padding:'8px 14px', borderBottom:'1px solid var(--line)', borderRight:'1px solid var(--line)', zIndex:1}}/>
+                      <td colSpan={exhibitorsInProject.length} style={{background:'#EDE9F6', borderBottom:'1px solid var(--line)', padding:'11px 14px', textAlign:'center'}}>
+                        <span style={{fontSize:13, fontWeight:700, color:'#4C1D95', letterSpacing:'0.02em'}}>{label}</span>
+                      </td>
+                    </tr>
+                  ))}
                   {slots.map(time => (
                     <tr key={time}>
                       <td style={{position:'sticky', left:0, background:'var(--paper)', padding:'8px 14px', borderBottom:'1px solid var(--line-2)', borderRight:'1px solid var(--line)', zIndex:1}}>
@@ -7316,7 +7341,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
             </div>
             <div style={{gridColumn:'1 / -1'}}>
               <label className="label">미팅 메모</label>
-              <textarea className="textarea" rows={2} value={modalData.notes || ''}
+              <textarea className="textarea" rows={autocompleteOn ? 5 : 2} value={modalData.notes || ''}
                         onChange={e=>setModalData({...modalData, notes:e.target.value})}
                         placeholder="예: NDA 준비, 피치덱 v3.2"/>
             </div>
