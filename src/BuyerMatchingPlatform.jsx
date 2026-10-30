@@ -862,9 +862,9 @@ const EVENT_CONFIG = {
     label: '2026 K-Animation Global Showcase in Canada',
     // 일자별 운영시간이 다른 행사 — date 항목의 timeStart/timeEnd가 있으면 그것이 우선 적용됨
     dates: [
-      { date: '2026-11-03', dow: '화 · Tue', timeStart: '13:30', timeEnd: '18:00',
-        // 미팅 시작 전 안내 줄 (시간 표기 없음, 미팅 편성 칸 아님) — 화면·엑셀 표 맨 위에 한 줄로 표시
-        preRows: ['Networking Lunch'] },
+      { date: '2026-11-03', dow: '화 · Tue', timeStart: '13:00', timeEnd: '18:00',
+        // 13:00 칸은 시간 대신 'Networking Lunch'로 표시 (점심 중 비공식 미팅 칸). 엑셀 합계에서는 제외
+        slotLabels: { '13:00': 'Networking Lunch' } },
       { date: '2026-11-04', dow: '수 · Wed', timeStart: '10:00', timeEnd: '16:00' },
     ],
     timeStart: '10:00',
@@ -1064,6 +1064,11 @@ function getQuarterSlotsForDate(config, date) {
 const SCHEDULE_EXPORT_PROJECTS = ['CANADA'];
 const MEETING_EXCLUDED_STATUSES = ['cancelled', 'canceled', 'declined', 'rejected'];
 
+// 날짜별 칸 이름 (예: 11/3 13:00 → 'Networking Lunch'). 없으면 null
+function slotLabelOf(config, date, time) {
+  const d = (config?.dates || []).find(x => x.date === date);
+  return d?.slotLabels?.[time] || null;
+}
 function timeLabel12(t) {
   const [h, m] = String(t).split(':').map(Number);
   const ap = h < 12 ? 'AM' : 'PM';
@@ -1113,6 +1118,7 @@ function buildScheduleWorkbookFiles({ project, config, exhibitors, meetings, buy
   };
 
   const sheets = [];
+  const totalSuffix = [];   // 합계 제외 안내 (예: Nov 3 Networking Lunch 4건)
   const perDay = {}; // exId → {date: count}
 
   // ── 일자별 시트
@@ -1128,28 +1134,27 @@ function buildScheduleWorkbookFiles({ project, config, exhibitors, meetings, buy
     rows.push([{ v: 'Booth No.', s: S.booth }, ...exhibitors.map((e, i) => ({ v: i + 1, s: S.booth }))]);
     heights.push(22);
     const merges = [`B1:${lastCol}1`];
-    for (const label of (d.preRows || [])) {   // 시간 없는 안내 줄 (예: Networking Lunch) — 참가사 칸 전체 병합
-      rows.push([{ v: '', s: S.time }, { v: label, s: S.lunch }, ...exhibitors.slice(1).map(() => ({ v: '', s: S.lunch }))]);
-      merges.push(`B${rows.length}:${lastCol}${rows.length}`);
-      heights.push(30);
-    }
     const colCount = exhibitors.map(() => 0);
+    let lunchCount = 0;
     for (const t of slots) {
       const end = addMinutesToTime(t, config.slotMinutes || 30);
       const blocked = getBlockedSlot(project, d.date, t);
+      const label = slotLabelOf(config, d.date, t);   // 이름 붙은 칸(Networking Lunch)은 합계에서 제외 — 팀 시간표 기준
       const cells = exhibitors.map((e, i) => {
         const ms = active.filter(m => m.exhibitorId === e.id && m.date === d.date && slotKeyOf(m.time) === t)
           .sort((a, b) => String(a.time).localeCompare(String(b.time)));
-        colCount[i] += ms.length;
+        if (!label) colCount[i] += ms.length;
+        else lunchCount += ms.length;
         if (!ms.length && blocked) return { v: blocked.title, s: S.total };
         return { v: ms.map(m => meetingCellText(m, buyerOf(m.buyerId))).join('\n'), s: ms.length ? cellStyleOf(ms) : S.body };
       });
-      rows.push([{ v: `${timeLabel12(t)}-${timeLabel12(end)}`, s: S.time }, ...cells]);
+      rows.push([label ? { v: label, s: S.lunch } : { v: `${timeLabel12(t)}-${timeLabel12(end)}`, s: S.time }, ...cells]);
       heights.push(34);
     }
     const last = 3 + slots.length;
     const sum = colCount.reduce((a, b) => a + b, 0);
     // 합계는 맨 아래 줄 하나만 (참가사별 건수, 전체 건수는 맨 앞 칸에 함께 표시)
+    if (lunchCount) totalSuffix.push(`${dateShort(d.date)} Networking Lunch ${lunchCount}건`);
     const totalRow = [{ v: `Total (${sum})`, s: S.total }, ...colCount.map(c => ({ v: c, s: S.total }))];   // 15분 미팅 2건이 한 칸에 있을 수 있어 수식 대신 실제 건수
     rows.push(totalRow); heights.push(24);
     exhibitors.forEach((e, i) => { (perDay[e.id] = perDay[e.id] || {})[d.date] = colCount[i]; });
@@ -1178,7 +1183,7 @@ function buildScheduleWorkbookFiles({ project, config, exhibitors, meetings, buy
                         : exhibitors.reduce((a, e) => a + (perDay[e.id]?.[dates[k - 1].date] || 0), 0);
       return { v: { f: `SUM(${col}${r0}:${col}${r1})`, v }, s: S.total };
     })]); heights.push(24);
-    rows.push([]); rows.push([{ v: `Exported ${new Date().toLocaleString('ko-KR')} · 노란 칸 = 운영사무국 편성 · 취소된 미팅 제외 · [TBC] = 미확정`, s: 0 }]);
+    rows.push([]); rows.push([{ v: `Exported ${new Date().toLocaleString('ko-KR')} · 노란 칸 = 운영사무국 편성 · 취소된 미팅 제외 · [TBC] = 미확정${totalSuffix.length ? ` · 합계 제외: ${totalSuffix.join(', ')}` : ''}`, s: 0 }]);
     sheets.unshift({ name: 'Summary', xml: sheetXml({ rows, heights, widths: [11, 34, 10, ...dates.map(() => 10)], merges: [`A1:${xlColName(ncol - 1)}1`], freeze: [0, 2] }) });
   }
 
@@ -1198,7 +1203,7 @@ function buildScheduleWorkbookFiles({ project, config, exhibitors, meetings, buy
 <xf numFmtId="0" fontId="5" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
 <xf numFmtId="0" fontId="4" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
 <xf numFmtId="0" fontId="4" fillId="6" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
-<xf numFmtId="0" fontId="5" fillId="7" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="5" fillId="7" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
 </cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
@@ -6951,18 +6956,12 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                   </tr>
                 </thead>
                 <tbody>
-                  {((config.dates.find(d => d.date === selectedDate) || {}).preRows || []).map(label => (
-                    <tr key={'pre-' + label}>
-                      <td style={{position:'sticky', left:0, background:'#EDE9F6', padding:'8px 14px', borderBottom:'1px solid var(--line)', borderRight:'1px solid var(--line)', zIndex:1}}/>
-                      <td colSpan={exhibitorsInProject.length} style={{background:'#EDE9F6', borderBottom:'1px solid var(--line)', padding:'11px 14px', textAlign:'center'}}>
-                        <span style={{fontSize:13, fontWeight:700, color:'#4C1D95', letterSpacing:'0.02em'}}>{label}</span>
-                      </td>
-                    </tr>
-                  ))}
                   {slots.map(time => (
                     <tr key={time}>
                       <td style={{position:'sticky', left:0, background:'var(--paper)', padding:'8px 14px', borderBottom:'1px solid var(--line-2)', borderRight:'1px solid var(--line)', zIndex:1}}>
-                        <span className="mono tabular" style={{fontSize:12, fontWeight:500, color:'var(--ink-2)'}}>{time}</span>
+                        {slotLabelOf(config, selectedDate, time)
+                          ? <span style={{fontSize:11, fontWeight:700, color:'#4C1D95', lineHeight:1.25, display:'block'}}>{slotLabelOf(config, selectedDate, time)}</span>
+                          : <span className="mono tabular" style={{fontSize:12, fontWeight:500, color:'var(--ink-2)'}}>{time}</span>}
                       </td>
                       {exhibitorsInProject.map(ex => {
                         const ms = meetingsAtCell(ex.id, time);
