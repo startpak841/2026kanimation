@@ -1010,6 +1010,8 @@ async function recordExhibitorVisit(exhibitorId) {
   } catch {}
 }
 
+// 참가사 화면에서 미팅 메모(운영사 작성) 조회 허용 행사
+const EXHIBITOR_MEMO_PROJECTS = ['CANADA'];
 // 공유 바이어 보호(참가사 화면 수정) 적용 행사
 const SHARED_BUYER_GUARD_PROJECTS = ['CANADA'];
 function nextBuyerId(buyers, project, offset = 0) {
@@ -4437,6 +4439,21 @@ function MyMeetingsTab({state, update, me}){
               </div>
             </div>
           </div>
+
+          {/* CANADA 전용: 운영사가 적은 미팅 메모(바이어 회사소개)를 참가사도 조회 — 읽기 전용 */}
+          {EXHIBITOR_MEMO_PROJECTS.includes(project) && slotAction.meeting && (() => {
+            const live = state.meetings.find(m => m.id === slotAction.meeting.id) || slotAction.meeting;
+            const memo = String(live.notes || '').trim();
+            if (!memo) return null;
+            return (
+              <div style={{marginTop:14}}>
+                <label className="label">미팅 메모 <span style={{fontWeight:400, color:'var(--muted)', fontSize:11}}>· 운영 사무국 작성</span></label>
+                <div style={{padding:'12px 14px', background:'var(--paper)', border:'1px solid var(--line)', borderRadius:'var(--radius-sm)', fontSize:13, lineHeight:1.65, color:'var(--ink)', whiteSpace:'pre-wrap', wordBreak:'keep-all'}}>
+                  {memo}
+                </div>
+              </div>
+            );
+          })()}
 
           <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:24, gap:8}}>
             <div>
