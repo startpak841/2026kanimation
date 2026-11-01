@@ -5953,6 +5953,117 @@ function Modal({title, children, onClose}){
 }
 
 // ---------------- EXHIBITORS MANAGEMENT ----------------
+// ============================ 최근 참가사 활동 (CANADA 전용, 관리자 화면) ============================
+// 참가사가 직접 바꾼 내용(변경 이력 actor='참가사')과 마지막 접속을 시간순으로 보여준다. 줄을 누르면 변경 전/후 문안.
+const ACTIVITY_SEEN_KEY = 'kags_activity_seen_v1';
+function fmtActTime(iso) {
+  const d = new Date(iso); if (isNaN(d)) return '—';
+  return d.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+}
+function ExhibitorActivityPanel({ exhibitors, changeLogs, loginLog }) {
+  const exMap = useMemo(() => new Map(exhibitors.map(e => [e.id, e])), [exhibitors]);
+  const [who, setWho] = useState('ALL');
+  const [kind, setKind] = useState('ALL');          // ALL | edit | visit
+  const [withAdmin, setWithAdmin] = useState(false);
+  const [open, setOpen] = useState(null);
+  const [limit, setLimit] = useState(15);
+  const [seen, setSeen] = useState(() => { try { return localStorage.getItem(ACTIVITY_SEEN_KEY) || ''; } catch { return ''; } });
+
+  const items = useMemo(() => {
+    const out = [];
+    (changeLogs || []).forEach((l, i) => {
+      if (!exMap.has(l.exhibitorId)) return;
+      if (!withAdmin && l.actor !== '참가사') return;
+      out.push({ key: 'c' + i, type: 'edit', ts: l.ts, exId: l.exhibitorId, actor: l.actor, section: l.section, label: l.label, before: l.before, after: l.after });
+    });
+    Object.entries(loginLog || {}).forEach(([exId, v]) => {
+      if (exMap.has(exId) && v?.lastAt) out.push({ key: 'v' + exId, type: 'visit', ts: v.lastAt, exId });
+    });
+    return out
+      .filter(x => (who === 'ALL' || x.exId === who) && (kind === 'ALL' || x.type === kind))
+      .sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
+  }, [changeLogs, loginLog, exMap, who, kind, withAdmin]);
+
+  const newCount = items.filter(x => x.type === 'edit' && seen && String(x.ts) > seen).length;
+  const markSeen = () => { const now = new Date().toISOString(); try { localStorage.setItem(ACTIVITY_SEEN_KEY, now); } catch {} setSeen(now); };
+  const short = v => { const t = String(v ?? '').replace(/\s+/g, ' ').trim(); return t.length > 70 ? t.slice(0, 70) + '…' : (t || '(빈 칸)'); };
+  const chip = (active, onClick, text) => (
+    <button onClick={onClick} style={{ padding: '4px 11px', borderRadius: 999, cursor: 'pointer', fontSize: 11.5, fontFamily: 'inherit',
+      border: active ? '1px solid var(--ink)' : '1px solid var(--line)', background: active ? 'var(--ink)' : 'var(--paper)', color: active ? 'var(--ivory)' : 'var(--ink-2)' }}>{text}</button>
+  );
+
+  return (
+    <div className="card" style={{ padding: '18px 20px', marginTop: 20, marginBottom: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <div className="mono" style={{ fontSize: 10, letterSpacing: '0.15em', color: 'var(--muted)' }}>CANADA · PARTICIPANT ACTIVITY</div>
+          <div style={{ fontSize: 16, fontWeight: 700, marginTop: 3 }}>
+            최근 참가사 활동
+            {newCount > 0 && <span style={{ marginLeft: 8, fontSize: 11, background: '#DC2626', color: '#fff', borderRadius: 999, padding: '2px 8px', verticalAlign: 'middle' }}>새 수정 {newCount}</span>}
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 3 }}>참가사가 직접 바꾼 내용과 마지막 접속 · 줄을 누르면 변경 전/후 문안을 볼 수 있습니다</div>
+        </div>
+        <button className="btn btn-ghost" onClick={markSeen} style={{ fontSize: 12, padding: '6px 12px' }}><Check size={13}/> 모두 확인함</button>
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 12, alignItems: 'center' }}>
+        {chip(kind === 'ALL', () => setKind('ALL'), '전체')}
+        {chip(kind === 'edit', () => setKind('edit'), '수정')}
+        {chip(kind === 'visit', () => setKind('visit'), '접속')}
+        <span style={{ width: 1, height: 18, background: 'var(--line)', margin: '0 4px' }}/>
+        <select className="select" value={who} onChange={e => setWho(e.target.value)} style={{ fontSize: 12, padding: '4px 8px', width: 'auto' }}>
+          <option value="ALL">참가사 전체</option>
+          {exhibitors.map(e => <option key={e.id} value={e.id}>{e.companyName}</option>)}
+        </select>
+        <label style={{ fontSize: 11.5, color: 'var(--muted)', display: 'inline-flex', alignItems: 'center', gap: 5, marginLeft: 6, cursor: 'pointer' }}>
+          <input type="checkbox" checked={withAdmin} onChange={e => setWithAdmin(e.target.checked)}/> 관리자 수정도 보기
+        </label>
+      </div>
+      <div style={{ marginTop: 12, borderTop: '1px solid var(--line-2)' }}>
+        {items.length === 0 && <div style={{ padding: 22, textAlign: 'center', color: 'var(--muted)', fontSize: 12.5 }}>표시할 활동이 없습니다.</div>}
+        {items.slice(0, limit).map(x => {
+          const ex = exMap.get(x.exId);
+          const isNew = x.type === 'edit' && seen && String(x.ts) > seen;
+          const isOpen = open === x.key;
+          return (
+            <div key={x.key} style={{ borderBottom: '1px solid var(--line-2)' }}>
+              <div onClick={() => x.type === 'edit' && setOpen(isOpen ? null : x.key)}
+                   style={{ display: 'grid', gridTemplateColumns: '92px 150px 1fr auto', gap: 10, padding: '9px 4px', alignItems: 'center', fontSize: 12.5, cursor: x.type === 'edit' ? 'pointer' : 'default' }}>
+                <span className="mono tabular" style={{ color: 'var(--muted)', fontSize: 11.5 }}>{fmtActTime(x.ts)}</span>
+                <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex?.companyName}</span>
+                {x.type === 'visit'
+                  ? <span style={{ color: 'var(--muted)' }}><span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 4, background: '#E0F2FE', color: '#075985', marginRight: 6 }}>접속</span>마지막 접속</span>
+                  : <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 4, background: x.actor === '참가사' ? '#FEF3C7' : '#F3F4F6', color: x.actor === '참가사' ? '#92400E' : '#4B5563', marginRight: 6 }}>{x.actor === '참가사' ? '참가사 수정' : x.actor + ' 수정'}</span>
+                      <b>{x.section}</b> · {x.label} <span style={{ color: 'var(--muted)' }}>— {short(x.after)}</span>
+                    </span>}
+                <span style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+                  {isNew && <span style={{ color: '#DC2626', fontWeight: 700, marginRight: 6 }}>NEW</span>}
+                  {x.type === 'edit' ? (isOpen ? '접기 ▲' : '전/후 보기 ▼') : ''}
+                </span>
+              </div>
+              {isOpen && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, padding: '0 4px 12px' }}>
+                  {[['변경 전', x.before, '#FEF2F2', '#991B1B'], ['변경 후', x.after, '#F0FDF4', '#166534']].map(([t, v, bg, fg]) => (
+                    <div key={t} style={{ background: bg, borderRadius: 6, padding: '10px 12px' }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 700, color: fg, marginBottom: 5 }}>{t}</div>
+                      <div style={{ fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--ink)' }}>{String(v ?? '').trim() || '(빈 칸)'}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {items.length > limit && (
+        <div style={{ textAlign: 'center', marginTop: 10 }}>
+          <button className="btn btn-ghost" onClick={() => setLimit(limit + 30)} style={{ fontSize: 12 }}>더 보기 ({items.length - limit}건 남음)</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ExhibitorsTab({state, update, readOnly, onProxy}){
   const [loginLog, setLoginLog] = useState({});
   useEffect(() => {
@@ -6015,6 +6126,14 @@ function ExhibitorsTab({state, update, readOnly, onProxy}){
     <div className="fade-in">
       <SectionHeader eyebrow="DATABASE / PARTICIPANTS" title="참가사 관리"
         desc="등록된 참가사 계정 및 제출 정보 일람. 회사정보·소개·IP·수요조사 4개 섹션의 완성도와 최근 수정 시각을 한눈에 확인할 수 있습니다. 각 행의 '상세' 버튼으로 전체 제출물을 조회·다운로드하세요."/>
+
+      {/* 최근 참가사 활동 — CANADA 참가사가 목록에 있을 때만 */}
+      {showLoginCol && (
+        <ExhibitorActivityPanel
+          exhibitors={state.exhibitors.filter(e => LOGIN_LOG_PROJECTS.includes(e.project))}
+          changeLogs={state?.changeLogs || []}
+          loginLog={loginLog}/>
+      )}
 
       {/* 프로젝트 필터 */}
       <div style={{display:'flex', gap:6, marginTop:24, marginBottom:14, flexWrap:'wrap'}}>
