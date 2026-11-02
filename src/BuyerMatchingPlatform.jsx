@@ -1280,7 +1280,7 @@ function buildDailySheetsHtml({ project, config, date, exhibitors, meetings, buy
     const grid = hours.map(h => {
       const inHour = ms.filter(m => parseInt(m.time, 10) === h);
       return `<div class="hcell${inHour.length ? ' on' : ''}"><div class="hh">${h}시</div>${inHour.map(m =>
-        `<div class="chip">${htmlEsc(chipOf(m))}</div><div class="bn">${htmlEsc(nameOf(m))}</div>`).join('')}</div>`;
+        `<div class="chip${label(m) ? ' sm' : ''}">${htmlEsc(chipOf(m))}</div><div class="bn">${htmlEsc(nameOf(m))}</div>`).join('')}</div>`;
     }).join('');
     const rows = ms.length ? ms.map(m => {
       const b = buyerOf(m.buyerId);
@@ -1325,6 +1325,7 @@ h1 small { font-size: 13px; font-weight: 400; color: #777; margin-left: 8px; let
 .hcell:last-child { border-right: 0; } .hcell.on { background: #F5F0FF; }
 .hh { font-size: 12px; color: #888; margin-bottom: 4px; }
 .chip { display: inline-block; background: #FEF3C7; color: #92400E; font-weight: 800; font-size: 15px; padding: 1px 6px; border-radius: 3px; margin-top: 4px; }
+.chip.sm { font-size: 10.5px; font-weight: 700; padding: 1px 5px; }
 .bn { font-size: 11.5px; font-weight: 700; color: #3B2A84; line-height: 1.3; margin-top: 2px; word-break: keep-all; }
 table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 14px; }
 th { text-align: left; font-size: 13px; color: #555; font-weight: 600; background: #F7F7F9; padding: 10px 12px; border-bottom: 2px solid #CCC; }
