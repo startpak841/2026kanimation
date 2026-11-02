@@ -1010,6 +1010,8 @@ async function recordExhibitorVisit(exhibitorId) {
   } catch {}
 }
 
+// 미팅 회차 표시 (예: Aux Mode (1), (2)) — CANADA 미팅 창에서 지정, 바이어명 뒤에 붙여 표시
+function roundSuffix(m) { const r = Number(m?.round); return r === 1 || r === 2 ? ` (${r})` : ''; }
 // 바이어 회사소개 ↔ 미팅 메모 연동 행사
 const MEMO_SYNC_PROJECTS = ['CANADA'];
 // 참가사 화면에서 미팅 메모(운영사 작성) 조회 허용 행사
@@ -1084,7 +1086,7 @@ function xlEsc(v) { return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;'
 
 // 미팅 1건 → 셀 문구 (바이어 회사명 + 짧은 메모 + 15분 시간 + 미확정 표시)
 function meetingCellText(m, buyer) {
-  let s = buyer?.companyName || '(바이어 미지정)';
+  let s = (buyer?.companyName || '(바이어 미지정)') + roundSuffix(m);
   const note = String(m.notes || '').trim();
   if (note && note.length <= 12) s += `(${note})`;
   if (meetingDuration(m) === 15) s += `\n(${m.time}-${addMinutesToTime(m.time, 15)})`;
@@ -1274,7 +1276,7 @@ function buildDailySheetsHtml({ project, config, date, exhibitors, meetings, buy
     const label = m => slotLabelOf(config, date, slotKeyOf(m.time));
     const rangeOf = m => label(m) || `${m.time}–${addMinutesToTime(m.time, meetingDuration(m))}`;
     const chipOf = m => label(m) || m.time;
-    const nameOf = m => { const b = buyerOf(m.buyerId); return (b?.companyName || '(바이어 미지정)') + (m.status === 'tentative' ? ' (조율중)' : ''); };
+    const nameOf = m => { const b = buyerOf(m.buyerId); return (b?.companyName || '(바이어 미지정)') + roundSuffix(m) + (m.status === 'tentative' ? ' (조율중)' : ''); };
     const grid = hours.map(h => {
       const inHour = ms.filter(m => parseInt(m.time, 10) === h);
       return `<div class="hcell${inHour.length ? ' on' : ''}"><div class="hh">${h}시</div>${inHour.map(m =>
@@ -4454,7 +4456,7 @@ function MyMeetingsTab({state, update, me}){
                                   </span>
                                 )}
                                 <span style={{fontSize:13.5, fontWeight:600, flex:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', minWidth:0}}>
-                                  {b?.companyName || '—'}
+                                  {(b?.companyName || '—') + roundSuffix(m)}
                                 </span>
                                 <span style={{flexShrink:0, opacity:0.85}}>
                                   {editable ? <Edit3 size={13}/> : <Eye size={13}/>}
@@ -4512,7 +4514,7 @@ function MyMeetingsTab({state, update, me}){
             <div className="grid" style={{gridTemplateColumns:'1fr 1fr', gap:12}}>
               <div style={{gridColumn:'1 / -1'}}>
                 <label className="label">회사명 <span style={{color:'var(--red)'}}>*</span></label>
-                <input className="input" value={slotAction.form.companyName}
+                <input className="input" value={slotAction.type === 'view' ? slotAction.form.companyName + roundSuffix(slotAction.meeting) : slotAction.form.companyName}
                        readOnly={slotAction.type === 'view'}
                        onChange={e=>setSlotAction({...slotAction, form:{...slotAction.form, companyName:e.target.value}})}
                        placeholder="예: Netflix Japan, BBC Studios"
@@ -7003,6 +7005,8 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
         notes: finalNotes,
         // 소요시간 — CANADA만 저장 (다른 행사는 필드를 건드리지 않음)
         ...(DURATION_PROJECTS.includes(subProject) ? { duration: meetingDuration(modalData) } : {}),
+        // 회차 표시 (1)/(2) — CANADA만
+        ...(autocompleteOn ? { round: (Number(modalData.round) === 1 || Number(modalData.round) === 2) ? Number(modalData.round) : null } : {}),
       };
 
       // 어레인지 주체 → 미팅 출처(source) 매핑. MIPCOM·CANADA만 주체 선택 반영.
@@ -7380,7 +7384,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                                     <div style={{flex:1, minWidth:0, textAlign:'left'}}>
                                       <div style={{fontSize:12, fontWeight:600, lineHeight:1.3,
                                         display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden', wordBreak:'break-word'}}>
-                                        {buyer?.companyName || '—'}
+                                        {(buyer?.companyName || '—') + roundSuffix(m)}
                                       </div>
                                       {(meetingDuration(m) === 15 || m.time !== time) && (
                                         <div className="mono tabular" style={{fontSize:10, fontWeight:600, opacity:0.92, marginTop:2}}>
@@ -7598,6 +7602,23 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                     onPick={pickBuyer}
                     placeholder={autocompleteOn ? undefined : '예: Netflix Japan, BBC Studios'}
                     disabled={readOnly}/>
+                  {autocompleteOn && (
+                    <div style={{display:'flex', alignItems:'center', gap:6, marginTop:8, flexWrap:'wrap'}}>
+                      <span style={{fontSize:11.5, color:'var(--muted)', marginRight:2}}>회차 표시</span>
+                      {[[null,'없음'],[1,'(1)'],[2,'(2)']].map(([v, t]) => {
+                        const on = (Number(modalData.round) || null) === v;
+                        return (
+                          <button key={t} type="button" onClick={() => setModalData({...modalData, round: v})} style={{
+                            padding:'4px 12px', borderRadius:999, cursor:'pointer', fontSize:12, fontWeight:600, fontFamily:'inherit',
+                            border: on ? '1px solid #7C3AED' : '1px solid var(--line)', background: on ? '#7C3AED' : 'var(--paper)', color: on ? '#fff' : 'var(--ink-2)',
+                          }}>{t}</button>
+                        );
+                      })}
+                      <span style={{fontSize:11, color:'var(--muted-2)'}}>
+                        {Number(modalData.round) ? `참가사 화면에 "${(modalData._companyName || '바이어')}${roundSuffix(modalData)}"로 표시` : '같은 바이어가 여러 팀으로 나뉠 때 (예: Aux Mode 1팀·2팀)'}
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="label">바이어명 (담당자)</label>
