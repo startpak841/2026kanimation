@@ -1284,7 +1284,15 @@ function buildDailySheetsHtml({ project, config, date, exhibitors, meetings, buy
     }).join('');
     const rows = ms.length ? ms.map(m => {
       const b = buyerOf(m.buyerId);
-      return `<tr><td class="t">${htmlEsc(rangeOf(m))}</td><td>${htmlEsc(nameOf(m))}</td><td>${htmlEsc(b?.contactName || '—')}</td></tr>`;
+      // 담당자 대신 회사소개(미팅 메모 → 없으면 바이어 DB 회사소개)
+      const full = String(m.notes || '').trim() || String(b?.interestedProducts || '').trim();
+      // 한 장에 들어가도록 첫 문장만 (전체 소개는 사이트 미팅 상세에서 확인)
+      const first = (/^(.+?(?:함|음|임|됨|있음|다)\.)(\s|$)/.exec(full) || [])[1] || full;
+      const intro = !full ? '—' : (first.length > 160 ? first.slice(0, 158) + '…' : first);
+      // 담당자가 있으면 담당자, 비어 있으면 회사소개(첫 문장)
+      const contact = String(b?.contactName || '').trim();
+      const third = contact ? `<td class="ct">${htmlEsc(contact)}${b?.position ? `<div class="pos">${htmlEsc(b.position)}</div>` : ''}</td>` : `<td class="intro">${htmlEsc(intro)}</td>`;
+      return `<tr><td class="t">${htmlEsc(rangeOf(m))}</td><td class="bn2">${htmlEsc(nameOf(m))}</td>${third}</tr>`;
     }).join('') : `<tr><td colspan="3" class="empty">이 날 편성된 미팅이 없습니다.</td></tr>`;
     return `<section class="page">
   <div class="top"><b>2026 K-Animation · 현장 비즈니스 미팅 스케줄</b><span>${htmlEsc(config.label)}</span></div>
@@ -1292,7 +1300,7 @@ function buildDailySheetsHtml({ project, config, date, exhibitors, meetings, buy
   <div class="dbar"><b>${dateKo}</b> <span class="dow">(${dowKo})</span> · 총 ${ms.length}건</div>
   <div class="cap">하루 시간표</div>
   <div class="grid" style="grid-template-columns:repeat(${hours.length},1fr)">${grid}</div>
-  <table><thead><tr><th style="width:24%">시간</th><th>바이어 회사</th><th style="width:30%">담당자</th></tr></thead><tbody>${rows}</tbody></table>
+  <table><thead><tr><th style="width:15%">시간</th><th style="width:24%">바이어 회사</th><th>담당자 <span style="font-weight:400;color:#888">(미정 시 회사소개)</span></th></tr></thead><tbody>${rows}</tbody></table>
   <div class="foot">발행일 ${issued} · K-Animation 운영사무국 — 변경사항은 운영데스크로 문의</div>
 </section>`;
   }).join('\n');
@@ -1318,10 +1326,14 @@ h1 small { font-size: 13px; font-weight: 400; color: #777; margin-left: 8px; let
 .hh { font-size: 12px; color: #888; margin-bottom: 4px; }
 .chip { display: inline-block; background: #FEF3C7; color: #92400E; font-weight: 800; font-size: 15px; padding: 1px 6px; border-radius: 3px; margin-top: 4px; }
 .bn { font-size: 11.5px; font-weight: 700; color: #3B2A84; line-height: 1.3; margin-top: 2px; word-break: keep-all; }
-table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 15px; }
+table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 14px; }
 th { text-align: left; font-size: 13px; color: #555; font-weight: 600; background: #F7F7F9; padding: 10px 12px; border-bottom: 2px solid #CCC; }
-td { padding: 11px 12px; border-bottom: 1px solid #DDD; vertical-align: top; word-break: keep-all; }
-td.t { white-space: nowrap; font-variant-numeric: tabular-nums; }
+td { padding: 8px 10px; border-bottom: 1px solid #DDD; vertical-align: top; word-break: keep-all; }
+td.t { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 13.5px; }
+td.bn2 { font-size: 13.5px; font-weight: 600; }
+td.intro { font-size: 10.5px; line-height: 1.5; color: #374151; }
+td.ct { font-size: 13.5px; } td.ct .pos { font-size: 11px; color: #6B7280; margin-top: 2px; }
+tr { break-inside: avoid; page-break-inside: avoid; }
 td.empty { text-align: center; color: #888; padding: 30px; }
 .foot { margin-top: auto; padding-top: 14px; border-top: 1px solid #DDD; text-align: center; font-size: 11px; color: #888; }
 @media print { body { background: #fff; } .bar { display: none; } .page { margin: 0; box-shadow: none; width: auto; min-height: calc(297mm - 26mm); padding: 0; page-break-after: always; break-after: page; } .page:last-child { page-break-after: auto; break-after: auto; } }
