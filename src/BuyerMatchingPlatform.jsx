@@ -1010,6 +1010,8 @@ async function recordExhibitorVisit(exhibitorId) {
   } catch {}
 }
 
+// 바이어 회사소개 ↔ 미팅 메모 연동 행사
+const MEMO_SYNC_PROJECTS = ['CANADA'];
 // 참가사 화면에서 미팅 메모(운영사 작성) 조회 허용 행사
 const EXHIBITOR_MEMO_PROJECTS = ['CANADA'];
 // 공유 바이어 보호(참가사 화면 수정) 적용 행사
@@ -5478,7 +5480,16 @@ function BuyersTab({state, fullState, update, project, readOnly}){
     setForm({...b, categories});
   };
   const saveEdit = () => {
-    update(s => ({...s, buyers: s.buyers.map(b => b.id===editId ? form : b)}));
+    update(s => {
+      const prev = s.buyers.find(b => b.id === editId);
+      const buyers = s.buyers.map(b => b.id===editId ? form : b);
+      // CANADA: 회사소개를 고치면, 그 바이어 미팅 중 메모가 예전 회사소개 그대로(또는 비어 있는) 것만 새 소개로 함께 바꿈 (직접 쓴 메모는 유지)
+      if (!prev || !MEMO_SYNC_PROJECTS.includes(form.project)) return {...s, buyers};
+      const oldIntro = String(prev.interestedProducts || '').trim(), newIntro = String(form.interestedProducts || '').trim();
+      if (oldIntro === newIntro) return {...s, buyers};
+      const meetings = s.meetings.map(m => m.buyerId === editId && (!String(m.notes || '').trim() || String(m.notes || '').trim() === oldIntro) ? {...m, notes: newIntro} : m);
+      return {...s, buyers, meetings};
+    });
     setEditId(null); setForm(null);
   };
   const deleteBuyer = (id) => {
@@ -6864,6 +6875,8 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
       _phone: b?.phone || '',
       _country: b?.country || '',
       _categoriesText: b ? buyerCategoryLabels(b).join(' / ') : '',
+      // 메모가 바이어 회사소개와 같으면 '자동 메모'로 취급 → 바이어(회사명)를 바꾸면 메모도 따라 바뀜
+      _autoNotes: b && String(m.notes || '').trim() && String(m.notes || '').trim() === String(b.interestedProducts || '').trim() ? String(m.notes || '').trim() : '',
     });
   };
 
@@ -6967,6 +6980,11 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
         } : b);
       }
 
+      // CANADA: 메모가 비었거나 자동 메모(회사소개 그대로)면, 최종 연결된 바이어의 회사소개로 맞춤 — 회사명을 바꾸면 메모도 함께 바뀜
+      const finalIntro = String((buyers.find(b => b.id === buyerId) || {}).interestedProducts || '').trim();
+      const memoIsAuto = !String(modalData.notes || '').trim() || (modalData._autoNotes && String(modalData.notes || '').trim() === modalData._autoNotes);
+      const finalNotes = autocompleteOn && memoIsAuto ? finalIntro : (modalData.notes || '');
+
       const meetingFields = {
         exhibitorId: modalData.exhibitorId,
         buyerId,
@@ -6974,7 +6992,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
         time: modalData.time,
         table: modalData.table || '',
         status: modalData.status,
-        notes: modalData.notes || '',
+        notes: finalNotes,
         // 소요시간 — CANADA만 저장 (다른 행사는 필드를 건드리지 않음)
         ...(DURATION_PROJECTS.includes(subProject) ? { duration: meetingDuration(modalData) } : {}),
       };
