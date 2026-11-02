@@ -6882,11 +6882,19 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
 
   // 자동완성: 회사명 타이핑 — 드롭다운으로 고른 바이어였다면 연결 해제(새 바이어로 처리)
   const typeBuyerCompany = (text) => {
-    setModalData(d => d._linkSource === 'pick'
-      ? { ...d, _companyName: text, buyerId: null, _linkSource: null, _country: '', _categories: [], _categoriesText: '',
-          // 선택 해제 시 자동으로 넣었던 회사소개 메모도 비움 (직접 고친 메모는 유지)
-          ...(d._autoNotes && d.notes === d._autoNotes ? { notes: '', _autoNotes: '' } : {}) }
-      : { ...d, _companyName: text });
+    setModalData(d => {
+      const next = d._linkSource === 'pick'
+        ? { ...d, _companyName: text, buyerId: null, _linkSource: null, _country: '', _categories: [], _categoriesText: '' }
+        : { ...d, _companyName: text };
+      // CANADA: 메모가 비었거나 자동 메모면, 입력한 회사명에 맞춰 바로 바꿔 보여줌
+      //  · 등록 바이어와 이름이 정확히 같으면 그 회사소개, 아니면 비움 (직접 고친 메모는 유지)
+      if (!autocompleteOn) return next;
+      const memoIsAuto = !String(d.notes || '').trim() || (d._autoNotes && String(d.notes || '').trim() === d._autoNotes);
+      if (!memoIsAuto) return next;
+      const hit = buyerOptions.find(o => normBuyerName(o.merged.companyName) === normBuyerName(text));
+      const intro = String(hit?.merged?.interestedProducts || '').trim();
+      return { ...next, notes: intro, _autoNotes: intro };
+    });
   };
   // 자동완성: 바이어 선택 — buyerId(FK)와 연락 정보를 폼에 세팅 (병합된 값 사용)
   const pickBuyer = (opt) => {
