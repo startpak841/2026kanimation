@@ -6862,13 +6862,15 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
       _position: b?.position || '',
       _email: b?.email || '',
       _phone: b?.phone || '',
+      _country: b?.country || '',
+      _categoriesText: b ? buyerCategoryLabels(b).join(' / ') : '',
     });
   };
 
   // 자동완성: 회사명 타이핑 — 드롭다운으로 고른 바이어였다면 연결 해제(새 바이어로 처리)
   const typeBuyerCompany = (text) => {
     setModalData(d => d._linkSource === 'pick'
-      ? { ...d, _companyName: text, buyerId: null, _linkSource: null, _country: '', _categories: [],
+      ? { ...d, _companyName: text, buyerId: null, _linkSource: null, _country: '', _categories: [], _categoriesText: '',
           // 선택 해제 시 자동으로 넣었던 회사소개 메모도 비움 (직접 고친 메모는 유지)
           ...(d._autoNotes && d.notes === d._autoNotes ? { notes: '', _autoNotes: '' } : {}) }
       : { ...d, _companyName: text });
@@ -6887,6 +6889,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
       _phone: b.phone || '',
       _country: b.country || '',
       _categories: buyerCategoryLabels(b),
+      _categoriesText: buyerCategoryLabels(b).join(' / '),
       // 미팅 메모: 바이어 DB '관심 품목 / 주요 사업'(회사소개)을 자동 입력. 직접 쓴 메모가 있으면 덮어쓰지 않음
       ...((() => {
         const intro = String(b.interestedProducts || '').trim();
@@ -6918,6 +6921,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
         const hit = buildBuyerOptions(s.buyers, subProject).find(o => o.key === normBuyerName(modalData._companyName));
         if (hit) { buyerId = hit.buyerId; autoLinked = true; }
       }
+      const parseCats = t => String(t || '').split(/[\/,·]/).map(x => x.trim()).filter(Boolean);
       // 자동 연결 시: 입력한 값만 반영하고 빈 칸은 기존 바이어 값 유지 (기존 담당자 정보를 지우지 않음)
       const keepIfBlank = (v, old) => autoLinked && !String(v || '').trim() ? old : v;
 
@@ -6934,8 +6938,9 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
           position: modalData._position || '',
           email: modalData._email || '',
           phone: modalData._phone || '',
-          country: '',
-          categories: guessBuyerCategories(modalData._companyName),
+          // CANADA: 모달에서 입력한 국가·분류 저장 (분류 칸이 비면 회사명으로 자동 추정)
+          country: autocompleteOn ? String(modalData._country || '').trim() : '',
+          categories: autocompleteOn && parseCats(modalData._categoriesText).length ? parseCats(modalData._categoriesText) : guessBuyerCategories(modalData._companyName),
           companySize: size || '',
           interestedProducts: '',
           invitationStatus: 'accepted',
@@ -6956,6 +6961,9 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
           phone: keepIfBlank(modalData._phone, b.phone),
           ...(modalData._linkSource === 'pick' && !String(b.country || '').trim() && modalData._country ? { country: modalData._country } : {}),
           ...(modalData._linkSource === 'pick' && !buyerCategoryLabels(b).length && (modalData._categories || []).length ? { categories: modalData._categories } : {}),
+          // CANADA: 국가·분류 칸에 입력한 값이 있으면 반영 (빈 칸이면 기존 값 유지)
+          ...(autocompleteOn && String(modalData._country || '').trim() ? { country: String(modalData._country).trim() } : {}),
+          ...(autocompleteOn && parseCats(modalData._categoriesText).length ? { categories: parseCats(modalData._categoriesText) } : {}),
         } : b);
       }
 
@@ -7554,7 +7562,9 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
               <div className="mono" style={{fontSize:10, letterSpacing:'0.15em', color:'var(--muted)', marginBottom:10}}>{autocompleteOn ? 'BUYER INFO · 등록 바이어 검색 또는 직접 입력' : 'BUYER INFO · 수동 입력'}</div>
               <div className="grid" style={{gridTemplateColumns:'1fr 1fr', gap:12}}>
                 <div style={{gridColumn:'1 / -1'}}>
-                  <label className="label">회사명 <span style={{color:'var(--red)'}}>*</span></label>
+                  <label className="label">회사명 <span style={{color:'var(--red)'}}>*</span>
+                    {autocompleteOn && <span style={{fontWeight:400, fontSize:11, color:'var(--muted)', marginLeft:6}}>· 입력하면 기존 바이어 검색 → 클릭 시 정보 자동 채움</span>}
+                  </label>
                   <BuyerCompanyAutocomplete
                     value={modalData._companyName}
                     options={buyerOptions}
@@ -7591,6 +7601,22 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
                          placeholder="+1-310-555-0100"
                          style={{background:'var(--paper)'}}/>
                 </div>
+                {autocompleteOn && (<>
+                  <div>
+                    <label className="label">국가</label>
+                    <input className="input" value={modalData._country || ''}
+                           onChange={e=>setModalData({...modalData, _country:e.target.value})}
+                           placeholder="예: Canada"
+                           style={{background:'var(--paper)'}}/>
+                  </div>
+                  <div>
+                    <label className="label">분류</label>
+                    <input className="input" value={modalData._categoriesText || ''}
+                           onChange={e=>setModalData({...modalData, _categoriesText:e.target.value})}
+                           placeholder="예: Broadcaster / Distributor ( / 로 구분)"
+                           style={{background:'var(--paper)'}}/>
+                  </div>
+                </>)}
               </div>
             </div>
 
@@ -7603,7 +7629,9 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
               </select>
             </div>
             <div style={{gridColumn:'1 / -1'}}>
-              <label className="label">미팅 메모</label>
+              <label className="label">{autocompleteOn
+                ? <>회사소개 <span style={{fontWeight:400, fontSize:11, color:'var(--muted)', marginLeft:4}}>· 미팅 메모 · 참가사에게 보임(운영사 편성 안내)</span></>
+                : '미팅 메모'}</label>
               <textarea className="textarea" rows={autocompleteOn ? 5 : 2} value={modalData.notes || ''}
                         onChange={e=>setModalData({...modalData, notes:e.target.value})}
                         placeholder="예: NDA 준비, 피치덱 v3.2"/>
