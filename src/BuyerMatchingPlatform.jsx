@@ -4436,7 +4436,7 @@ function MyMeetingsTab({state, update, me}){
                   <b style={{color:'var(--ink)', fontSize:15}}>{isToday ? '오늘 ' : ''}내 미팅 {list.filter(m => m.status !== 'cancelled').length}건</b>
                   <span style={{marginLeft:6}}>· 눌러서 바이어 정보 보기</span>
                 </div>
-                <button className="btn btn-ghost" onClick={() => setViewAll(true)} style={{fontSize:12, padding:'5px 10px'}}>전체 시간표 보기 (빈 시간에 미팅 추가)</button>
+                {/* '전체 시간표 보기' 버튼은 행사 운영상 불필요해 숨김 (viewAll 전환 코드는 남겨둠) */}
               </div>
               {list.length === 0 && <div className="card" style={{padding:28, textAlign:'center', color:'var(--muted)', fontSize:13.5}}>이 날 편성된 미팅이 없습니다.</div>}
               {/* 시간순으로 위→아래 한 줄씩 */}
