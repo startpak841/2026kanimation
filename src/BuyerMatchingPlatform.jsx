@@ -1282,6 +1282,9 @@ function buildDailySheetsHtml({ project, config, date, exhibitors, meetings, buy
       return `<div class="hcell${inHour.length ? ' on' : ''}"><div class="hh">${h}시</div>${inHour.map(m =>
         `<div class="chip${label(m) ? ' sm' : ''}">${htmlEsc(chipOf(m))}</div><div class="bn">${htmlEsc(nameOf(m))}</div>`).join('')}</div>`;
     }).join('');
+    // 세 번째 칸 제목: 담당자가 모두 있으면 '담당자', 하나도 없으면 '회사소개', 섞여 있으면 '담당자 / 회사소개'
+    const nContact = ms.filter(m => String(buyerOf(m.buyerId)?.contactName || '').trim()).length;
+    const thirdHead = !ms.length || nContact === 0 ? '회사소개' : nContact === ms.length ? '담당자' : '담당자 / 회사소개';
     const rows = ms.length ? ms.map(m => {
       const b = buyerOf(m.buyerId);
       // 담당자 대신 회사소개(미팅 메모 → 없으면 바이어 DB 회사소개)
@@ -1300,7 +1303,7 @@ function buildDailySheetsHtml({ project, config, date, exhibitors, meetings, buy
   <div class="dbar"><b>${dateKo}</b> <span class="dow">(${dowKo})</span> · 총 ${ms.length}건</div>
   <div class="cap">하루 시간표</div>
   <div class="grid" style="grid-template-columns:repeat(${hours.length},1fr)">${grid}</div>
-  <table><thead><tr><th style="width:15%">시간</th><th style="width:24%">바이어 회사</th><th>담당자 <span style="font-weight:400;color:#888">(미정 시 회사소개)</span></th></tr></thead><tbody>${rows}</tbody></table>
+  <table><thead><tr><th style="width:15%">시간</th><th style="width:24%">바이어 회사</th><th>${thirdHead}</th></tr></thead><tbody>${rows}</tbody></table>
   <div class="foot">발행일 ${issued} · K-Animation 운영사무국 — 변경사항은 운영데스크로 문의</div>
 </section>`;
   }).join('\n');
