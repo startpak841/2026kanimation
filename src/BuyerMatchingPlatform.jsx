@@ -1312,7 +1312,8 @@ function buildDailySheetsHtml({ project, config, date, exhibitors, meetings, buy
     const chipOf = m => label(m) || m.time;
     // 변동 가능성 표시는 HTML로 붙임 (작은 빨간 글씨) — nameOf는 글자만, nameHtml은 표시 포함
     const uncHtml = m => isPrintUncertainBuyer(buyerOf(m.buyerId)) ? ' <span class="unc">(변동 가능성 있음)</span>' : '';
-    const nameOf = m => { const b = buyerOf(m.buyerId); return (b?.companyName || '(바이어 미지정)') + roundSuffix(m) + (m.status === 'tentative' ? ' (조율중)' : ''); };
+    // 인쇄물에는 '(조율중)'을 붙이지 않음 (변동 표시는 '(변동 가능성 있음)'으로 통일)
+    const nameOf = m => { const b = buyerOf(m.buyerId); return (b?.companyName || '(바이어 미지정)') + roundSuffix(m); };
     const grid = hours.map(h => {
       const inHour = ms.filter(m => parseInt(m.time, 10) === h);
       return `<div class="hcell${inHour.length ? ' on' : ''}"><div class="hh">${h}시</div>${inHour.map(m =>
