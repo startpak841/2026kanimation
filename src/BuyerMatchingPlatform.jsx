@@ -1331,6 +1331,7 @@ function buildDailySheetsHtml({ project, config, date, exhibitors, meetings, buy
   <div class="top"><b>2026 K-Animation · 현장 비즈니스 미팅 스케줄</b><span>${htmlEsc(config.label)}</span></div>
   <h1>${htmlEsc(ex.companyName)} <small>Booth ${idx + 1}${ex.companyNameEn ? ' · ' + htmlEsc(ex.companyNameEn) : ''}</small></h1>
   <div class="dbar"><b>${dateKo}</b> <span class="dow">(${dowKo})</span> · 총 ${ms.length}건</div>
+  <div class="warn">⚠ 미팅 변동 가능성 있음 <span style="font-weight:500">— 현장 상황에 따라 미팅 시간·바이어가 바뀔 수 있습니다. 최신 일정은 플랫폼 '미팅 스케줄'에서 확인해 주세요.</span></div>
   <div class="cap">하루 시간표</div>
   <div class="grid" style="grid-template-columns:repeat(${hours.length},1fr)">${grid}</div>
   <table><thead><tr><th style="width:15%">시간</th><th style="width:24%">바이어 회사</th><th>${thirdHead}</th></tr></thead><tbody>${rows}</tbody></table>
@@ -1349,19 +1350,20 @@ body { margin: 0; font-family: 'Pretendard','Apple SD Gothic Neo','Malgun Gothic
 .page { width: 210mm; min-height: 297mm; margin: 16px auto; background: #fff; padding: 12mm 12mm 14mm; position: relative; box-shadow: 0 2px 12px rgba(0,0,0,.12); display: flex; flex-direction: column; }
 .top { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 3px solid #111; padding-bottom: 6px; font-size: 13px; }
 .top b { font-size: 15px; } .top span { color: #555; }
-h1 { font-size: 28px; margin: 14px 0 10px; letter-spacing: -0.02em; }
+h1 { font-size: 26px; margin: 10px 0 8px; letter-spacing: -0.02em; }
 h1 small { font-size: 13px; font-weight: 400; color: #777; margin-left: 8px; letter-spacing: 0; }
 .dbar { background: #F1F1F4; border-left: 7px solid ${accent}; padding: 9px 16px; font-size: 23px; }
 .dbar .dow { font-size: 18px; color: #666; }
-.cap { margin: 12px 0 5px; font-size: 13px; font-weight: 700; color: #444; }
+.warn { margin-top: 5px; padding: 4px 10px; background: #FEF2F2; border: 1px solid #FCA5A5; border-radius: 5px; font-size: 11.5px; font-weight: 700; color: #B91C1C; }
+.cap { margin: 10px 0 5px; font-size: 13px; font-weight: 700; color: #444; }
 .grid { display: grid; border: 1px solid #DDD; }
-.hcell { border-right: 1px solid #DDD; padding: 6px 4px 8px; text-align: center; min-height: 80px; }
+.hcell { border-right: 1px solid #DDD; padding: 5px 4px 6px; text-align: center; min-height: 70px; }
 .hcell:last-child { border-right: 0; } .hcell.on { background: #F5F0FF; }
 .hh { font-size: 12px; color: #888; margin-bottom: 4px; }
 .chip { display: inline-block; background: #FEF3C7; color: #92400E; font-weight: 800; font-size: 15px; padding: 1px 6px; border-radius: 3px; margin-top: 4px; }
 .chip.sm { font-size: 10.5px; font-weight: 700; padding: 1px 5px; }
 .bn { font-size: 11.5px; font-weight: 700; color: #3B2A84; line-height: 1.3; margin-top: 2px; word-break: keep-all; }
-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 14px; }
+table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
 th { text-align: left; font-size: 13px; color: #555; font-weight: 600; background: #F7F7F9; padding: 10px 12px; border-bottom: 2px solid #CCC; }
 td { padding: 6px 10px; border-bottom: 1px solid #DDD; vertical-align: top; word-break: keep-all; }
 td.t { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 13.5px; }
