@@ -1348,7 +1348,7 @@ function buildDailySheetsHtml({ project, config, date, exhibitors, meetings, buy
 
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${htmlEsc(config.label)} · ${dateKo} 참가사별 미팅 스케줄</title>
 <style>
-@page { size: A4 portrait; margin: 12mm 12mm 14mm; }
+@page { size: letter portrait; margin: 10mm 11mm 10mm; }   /* 캐나다 현장 프린터 = Letter 용지 */
 * { box-sizing: border-box; }
 body { margin: 0; font-family: 'Pretendard','Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR','Noto Sans CJK KR',sans-serif; color: #1E1B4B; background: #ECECF1; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .bar { position: sticky; top: 0; z-index: 5; background: #1E1B4B; color: #fff; padding: 10px 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
@@ -1363,7 +1363,7 @@ h1 small { font-size: 13px; font-weight: 400; color: #777; margin-left: 8px; let
 .warn { margin-top: 5px; padding: 4px 10px; background: #FEF2F2; border: 1px solid #FCA5A5; border-radius: 5px; font-size: 11.5px; font-weight: 700; color: #B91C1C; }
 .cap { margin: 10px 0 5px; font-size: 13px; font-weight: 700; color: #444; }
 .grid { display: grid; border: 1px solid #DDD; }
-.hcell { border-right: 1px solid #DDD; padding: 5px 4px 6px; text-align: center; min-height: 70px; }
+.hcell { border-right: 1px solid #DDD; padding: 4px 4px 5px; text-align: center; min-height: 60px; }
 .hcell:last-child { border-right: 0; } .hcell.on { background: #F5F0FF; }
 .hh { font-size: 12px; color: #888; margin-bottom: 4px; }
 .chip { display: inline-block; background: #FEF3C7; color: #92400E; font-weight: 800; font-size: 15px; padding: 1px 6px; border-radius: 3px; margin-top: 4px; }
@@ -1371,19 +1371,19 @@ h1 small { font-size: 13px; font-weight: 400; color: #777; margin-left: 8px; let
 .bn { font-size: 11.5px; font-weight: 700; color: #3B2A84; line-height: 1.3; margin-top: 2px; word-break: keep-all; }
 table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
 th { text-align: left; font-size: 13px; color: #555; font-weight: 600; background: #F7F7F9; padding: 10px 12px; border-bottom: 2px solid #CCC; }
-td { padding: 6px 10px; border-bottom: 1px solid #DDD; vertical-align: top; word-break: keep-all; }
+td { padding: 5px 10px; border-bottom: 1px solid #DDD; vertical-align: top; word-break: keep-all; }
 td.t { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 13.5px; }
 td.bn2 { font-size: 13.5px; font-weight: 600; }
 .unc { color: #DC2626; font-size: 10.5px; font-weight: 700; white-space: nowrap; }
 .bn .unc { font-size: 9.5px; }
-td.intro { font-size: 10.5px; line-height: 1.5; color: #374151; }
+td.intro { font-size: 10px; line-height: 1.45; color: #374151; }
 td.ct { font-size: 13.5px; } td.ct .pos { font-size: 11px; color: #6B7280; margin-top: 2px; }
 tr { break-inside: avoid; page-break-inside: avoid; }
 td.empty { text-align: center; color: #888; padding: 30px; }
 .notice { margin-top: auto; border: 1.5px solid #E879F9; background: #FDF4FF; border-radius: 6px; padding: 7px 11px; font-size: 10px; line-height: 1.5; color: #3B0764; }
 .notice b { display: block; font-size: 11.5px; margin-bottom: 2px; color: #86198F; } .notice .ni { color: #6B21A8; margin-top: 2px; }
 .foot { margin-top: 6px; padding-top: 6px; border-top: 1px solid #DDD; text-align: center; font-size: 10.5px; color: #888; }
-@media print { body { background: #fff; } .bar { display: none; } .page { margin: 0; box-shadow: none; width: auto; min-height: calc(297mm - 26mm); padding: 0; page-break-after: always; break-after: page; } .page:last-child { page-break-after: auto; break-after: auto; } }
+@media print { body { background: #fff; } .bar { display: none; } .dbar { padding: 7px 14px; font-size: 21px; } h1 { font-size: 24px; margin: 8px 0 6px; } .page { display: block; margin: 0; box-shadow: none; width: auto; min-height: 0; padding: 0; page-break-after: always; break-after: page; } .page:last-child { page-break-after: auto; break-after: auto; } .notice { margin-top: 10px; } }
 </style></head><body>
 <div class="bar"><span>${dateKo}(${dowKo}) · 참가사 ${exhibitors.length}곳 · 한 장에 한 참가사 — [인쇄 / PDF 저장]을 누른 뒤 대상에서 'PDF로 저장'을 고르세요</span><button onclick="window.print()">인쇄 / PDF 저장</button></div>
 ${pages}
