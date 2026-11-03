@@ -4169,13 +4169,19 @@ function MyMeetingsTab({state, update, me}){
   // 휴대폰(CANADA): 내 미팅만 카드로 보여주고, 행사 당일이면 오늘 날짜를 먼저 엶
   const isMobile = useIsMobile();
   const mobile = isMobile && MOBILE_LIST_PROJECTS.includes(project);
+  // CANADA: PC·휴대폰 모두 '내 미팅' 카드 목록이 기본. '전체 시간표'로 바꾸면 기존 표(빈 시간에 직접 미팅 추가)
+  const [viewAll, setViewAll] = useState(false);
+  const listMode = MOBILE_LIST_PROJECTS.includes(project) && !viewAll;
   const [nowTick, setNowTick] = useState(0);
   useEffect(() => { if (!mobile) return; const t = setInterval(() => setNowTick(x => x + 1), 60000); return () => clearInterval(t); }, [mobile]);
+  // 행사 당일이면 처음 열 때 한 번만 오늘 날짜로 (이후 사용자가 고른 날짜는 그대로 유지)
+  const todayPicked = useRef(false);
   useEffect(() => {
-    if (!mobile) return;
+    if (todayPicked.current || !MOBILE_LIST_PROJECTS.includes(project)) return;
+    todayPicked.current = true;
     const today = eventNow(project).date;
     if (config.dates.some(d => d.date === today)) setSelectedDate(today);
-  }, [mobile, project]);
+  }, [project]);
 
   // 본인 미팅만 필터
   const myMeetings = state.meetings.filter(m => m.exhibitorId === me.id);
@@ -4335,16 +4341,62 @@ function MyMeetingsTab({state, update, me}){
     closeAction();
   };
 
+  // 날짜 버튼 + 상담실적지 버튼 (side=true: PC 2단 배치의 오른쪽 칸용 세로 배치)
+  const renderDateTabs = (side) => (
+        <div style={side ? {display:'flex', gap:6, flexWrap:'wrap', marginBottom:10} : {display:'flex', gap:6, marginTop:22, marginBottom:14, overflowX: mobile ? 'visible' : 'auto', flexWrap: mobile ? 'wrap' : 'nowrap', paddingBottom:2}}>
+          {config.dates.map(d => {
+            const active = selectedDate === d.date;
+            const cnt = myMeetings.filter(m => m.date === d.date).length;
+            return (
+              <button key={d.date} onClick={()=>setSelectedDate(d.date)} style={{
+                ...((mobile || side) ? { flex:'1 1 0', minWidth:0 } : {}),
+                padding:'10px 16px', borderRadius:'var(--radius-sm)', cursor:'pointer',
+                border: active ? '1px solid var(--ink)' : '1px solid var(--line)',
+                background: active ? 'var(--ink)' : 'var(--paper)',
+                color: active ? 'var(--ivory)' : 'var(--ink-2)',
+                fontFamily:'inherit', display:'flex', flexDirection:'column', alignItems:'flex-start', gap:2,
+                minWidth:112, transition:'all .15s',
+              }}>
+                <span className="mono" style={{fontSize:10.5, opacity: active ? 0.7 : 0.55, letterSpacing:'0.05em'}}>{d.dow}</span>
+                <span style={{fontSize:14, fontWeight:600}}>{d.date.slice(5)}</span>
+                <span className="mono tabular" style={{fontSize:10, opacity: active ? 0.65 : 0.5}}>{cnt}건 편성</span>
+              </button>
+            );
+          })}
+          {CONSULT_FORM_PROJECTS.includes(project) && (
+            <button onClick={downloadConsultForm} title="상담실적지 엑셀 양식을 내려받습니다" style={{
+              padding:'10px 16px', borderRadius:'var(--radius-sm)', cursor:'pointer',
+              border:'1px solid #16A34A', background:'#F0FDF4', color:'#166534',
+              fontFamily:'inherit', fontSize:13, fontWeight:600, whiteSpace:'nowrap',
+              display:'inline-flex', alignItems:'center', gap:8, minWidth:112,
+              ...((mobile || side) ? { flexBasis:'100%', justifyContent:'center' } : {}),
+            }}>
+              <Download size={15}/> 상담실적지 양식 다운로드
+            </button>
+          )}
+        </div>
+  );
+  // 추가 실적 제출 안내 (side=true: 오른쪽 칸용 작은 글씨)
+  const renderNotice = (side) => (
+    CONSULT_FORM_PROJECTS.includes(project) ? (
+          <div style={{margin: side ? 0 : '0 0 14px', padding: (mobile || side) ? '10px 12px' : '12px 16px', borderRadius:8, background:'#FDF4FF', border:'1px solid #F0ABFC', fontSize: side ? 11.5 : mobile ? 12 : 12.5, lineHeight:1.6, color:'#3B0764'}}>
+            <div style={{fontWeight:700, color:'#86198F', marginBottom:2}}>📌 {EXTRA_RESULT_NOTICE.title}</div>
+            {EXTRA_RESULT_NOTICE.body}
+            <div style={{color:'#6B21A8', marginTop:3, fontSize: (mobile || side) ? 11 : 12}}>기재 항목: {EXTRA_RESULT_NOTICE.items}</div>
+          </div>
+        ) : null
+  );
+  const desk2 = listMode && !mobile;   // PC 2단: 왼쪽 내 미팅 목록 · 오른쪽 날짜/안내
   const filledCount = myMeetingsForDate.length;
   const editableCount = myMeetingsForDate.filter(canEdit).length;
 
   return (
     <div className="fade-in">
       <SectionHeader eyebrow="SECTION 06" title="비즈니스 미팅 스케줄"
-        desc={`${config.label} 기간 중 본인의 미팅 스케줄입니다. 관리자가 편성한 미팅은 자동 반영되며, 빈 슬롯은 본인이 직접 바이어를 선택해 채울 수 있습니다. 본인이 편성한 미팅만 수정/삭제 가능합니다.`}/>
+        desc={listMode ? `${config.label} · 운영사무국이 편성한 내 미팅입니다. 미팅을 누르면 바이어 정보를 볼 수 있습니다.` : `${config.label} 기간 중 본인의 미팅 스케줄입니다. 관리자가 편성한 미팅은 자동 반영되며, 빈 슬롯은 본인이 직접 바이어를 선택해 채울 수 있습니다. 본인이 편성한 미팅만 수정/삭제 가능합니다.`}/>
 
       {/* 권한 안내 박스 (휴대폰에서는 숨김) */}
-      <div style={{marginTop:20, display: mobile ? 'none' : 'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
+      <div style={{marginTop:20, display: (mobile || (MOBILE_LIST_PROJECTS.includes(project) && !viewAll)) ? 'none' : 'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
         <div style={{padding:16, background:'var(--ivory-2)', borderLeft:`3px solid ${projectColor(project).bg}`, borderRadius:'var(--radius-sm)'}}>
           <div className="mono" style={{fontSize:10, letterSpacing:'0.15em', color:'var(--muted)', marginBottom:6}}>SELF-SCHEDULED</div>
           <div style={{fontSize:12.5, lineHeight:1.6, color:'var(--ink)'}}>
@@ -4365,50 +4417,11 @@ function MyMeetingsTab({state, update, me}){
         </div>
       ) : (
       <>
-        {/* 날짜 탭 */}
-        <div style={{display:'flex', gap:6, marginTop:22, marginBottom:14, overflowX: mobile ? 'visible' : 'auto', flexWrap: mobile ? 'wrap' : 'nowrap', paddingBottom:2}}>
-          {config.dates.map(d => {
-            const active = selectedDate === d.date;
-            const cnt = myMeetings.filter(m => m.date === d.date).length;
-            return (
-              <button key={d.date} onClick={()=>setSelectedDate(d.date)} style={{
-                ...(mobile ? { flex:'1 1 0' } : {}),
-                padding:'10px 16px', borderRadius:'var(--radius-sm)', cursor:'pointer',
-                border: active ? '1px solid var(--ink)' : '1px solid var(--line)',
-                background: active ? 'var(--ink)' : 'var(--paper)',
-                color: active ? 'var(--ivory)' : 'var(--ink-2)',
-                fontFamily:'inherit', display:'flex', flexDirection:'column', alignItems:'flex-start', gap:2,
-                minWidth:112, transition:'all .15s',
-              }}>
-                <span className="mono" style={{fontSize:10.5, opacity: active ? 0.7 : 0.55, letterSpacing:'0.05em'}}>{d.dow}</span>
-                <span style={{fontSize:14, fontWeight:600}}>{d.date.slice(5)}</span>
-                <span className="mono tabular" style={{fontSize:10, opacity: active ? 0.65 : 0.5}}>{cnt}건 편성</span>
-              </button>
-            );
-          })}
-          {CONSULT_FORM_PROJECTS.includes(project) && (
-            <button onClick={downloadConsultForm} title="상담실적지 엑셀 양식을 내려받습니다" style={{
-              padding:'10px 16px', borderRadius:'var(--radius-sm)', cursor:'pointer',
-              border:'1px solid #16A34A', background:'#F0FDF4', color:'#166534',
-              fontFamily:'inherit', fontSize:13, fontWeight:600, whiteSpace:'nowrap',
-              display:'inline-flex', alignItems:'center', gap:8, minWidth:112,
-              ...(mobile ? { flexBasis:'100%', justifyContent:'center' } : {}),
-            }}>
-              <Download size={15}/> 상담실적지 양식 다운로드
-            </button>
-          )}
-        </div>
+        {!desk2 && renderDateTabs(false)}
+        {!desk2 && renderNotice(false)}
 
-        {CONSULT_FORM_PROJECTS.includes(project) && (
-          <div style={{margin:'0 0 14px', padding: mobile ? '10px 12px' : '12px 16px', borderRadius:8, background:'#FDF4FF', border:'1px solid #F0ABFC', fontSize: mobile ? 12 : 12.5, lineHeight:1.6, color:'#3B0764'}}>
-            <div style={{fontWeight:700, color:'#86198F', marginBottom:2}}>📌 {EXTRA_RESULT_NOTICE.title}</div>
-            {EXTRA_RESULT_NOTICE.body}
-            <div style={{color:'#6B21A8', marginTop:3, fontSize: mobile ? 11.5 : 12}}>기재 항목: {EXTRA_RESULT_NOTICE.items}</div>
-          </div>
-        )}
-
-        {mobile ? (() => {
-          // ── 휴대폰: 내 미팅 카드 목록 (빈 시간·추가 버튼 없이 시간순) ──
+        {listMode ? (() => {
+          // ── 내 미팅 카드 목록 (PC·휴대폰 공통) (빈 시간·추가 버튼 없이 시간순) ──
           void nowTick;
           const nowE = eventNow(project);
           const isToday = nowE.date === selectedDate;
@@ -4416,14 +4429,18 @@ function MyMeetingsTab({state, update, me}){
           const endOf = m => addMinutesToTime(m.time, meetingDuration(m));
           const cur = isToday ? list.find(m => m.time <= nowE.hm && nowE.hm < endOf(m) && m.status !== 'cancelled') : null;
           const next = isToday ? list.find(m => m.time > nowE.hm && m.status !== 'cancelled') : null;
-          return (
-            <div>
-              <div style={{fontSize:13, color:'var(--muted)', margin:'2px 2px 10px'}}>
-                <b style={{color:'var(--ink)', fontSize:15}}>{isToday ? '오늘 ' : ''}내 미팅 {list.filter(m => m.status !== 'cancelled').length}건</b>
-                <span style={{marginLeft:6}}>· 눌러서 바이어 정보 보기</span>
+          const listEl = (
+            <div style={{minWidth:0}}>
+              <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, flexWrap:'wrap', margin:'2px 2px 8px'}}>
+                <div style={{fontSize:13, color:'var(--muted)'}}>
+                  <b style={{color:'var(--ink)', fontSize:15}}>{isToday ? '오늘 ' : ''}내 미팅 {list.filter(m => m.status !== 'cancelled').length}건</b>
+                  <span style={{marginLeft:6}}>· 눌러서 바이어 정보 보기</span>
+                </div>
+                <button className="btn btn-ghost" onClick={() => setViewAll(true)} style={{fontSize:12, padding:'5px 10px'}}>전체 시간표 보기 (빈 시간에 미팅 추가)</button>
               </div>
               {list.length === 0 && <div className="card" style={{padding:28, textAlign:'center', color:'var(--muted)', fontSize:13.5}}>이 날 편성된 미팅이 없습니다.</div>}
-              <div style={{display:'flex', flexDirection:'column', gap:8}}>
+              {/* 시간순으로 위→아래 한 줄씩 */}
+              <div style={{display:'flex', flexDirection:'column', gap: mobile ? 8 : 6}}>
                 {list.map(m => {
                   const b = getBuyer(m.buyerId);
                   const lbl = slotLabelOf(config, selectedDate, slotKeyOf(m.time));
@@ -4433,17 +4450,17 @@ function MyMeetingsTab({state, update, me}){
                   const first = (/^(.+?(?:함|음|임|됨|있음|다)\.)(\s|$)/.exec(memo) || [])[1] || memo;
                   return (
                     <div key={m.id} onClick={() => openEdit(m)} style={{
-                      display:'flex', gap:12, padding:'12px 14px', borderRadius:10, cursor:'pointer',
+                      display:'flex', gap:12, padding: mobile ? '12px 14px' : '7px 14px', borderRadius:10, cursor:'pointer', alignItems: mobile ? 'flex-start' : 'center',
                       background: isCur ? '#FEF3C7' : 'var(--paper)',
                       border: isCur ? '2px solid #F59E0B' : isNext ? '2px solid #8B5CF6' : '1px solid var(--line)',
                       opacity: cancelled ? 0.5 : 1,
                     }}>
-                      <div style={{flexShrink:0, width:62, textAlign:'left'}}>
+                      <div style={{flexShrink:0, width: mobile ? 62 : 104, textAlign:'left', display: mobile ? 'block' : 'flex', alignItems:'baseline', gap:4}}>
                         {lbl
                           ? <div style={{fontSize:12, fontWeight:700, color:'#4C1D95', lineHeight:1.25}}>{lbl}</div>
                           : <>
                               <div className="mono tabular" style={{fontSize:17, fontWeight:700, color:'var(--ink)', lineHeight:1.1}}>{m.time}</div>
-                              <div className="mono tabular" style={{fontSize:11, color:'var(--muted)', marginTop:2}}>~{endOf(m)}</div>
+                              <div className="mono tabular" style={{fontSize:11, color:'var(--muted)', marginTop: mobile ? 2 : 0}}>~{endOf(m)}</div>
                             </>}
                       </div>
                       <div style={{flex:1, minWidth:0}}>
@@ -4453,11 +4470,11 @@ function MyMeetingsTab({state, update, me}){
                           {m.status === 'tentative' && <span style={{fontSize:10.5, fontWeight:700, color:'#1F2937', background:'#FDE68A', borderRadius:999, padding:'1px 8px'}}>조율중</span>}
                           {cancelled && <span style={{fontSize:10.5, fontWeight:700, color:'#fff', background:'#DC2626', borderRadius:999, padding:'1px 8px'}}>취소</span>}
                         </div>
-                        <div style={{fontSize:15.5, fontWeight:700, color:'var(--ink)', lineHeight:1.3, wordBreak:'break-word', marginTop:(isCur||isNext||cancelled||m.status==='tentative') ? 4 : 0, textDecoration: cancelled ? 'line-through' : 'none'}}>
+                        <div style={{fontSize: mobile ? 15.5 : 14.5, fontWeight:700, color:'var(--ink)', lineHeight:1.3, wordBreak:'break-word', marginTop:(isCur||isNext||cancelled||m.status==='tentative') ? 4 : 0, textDecoration: cancelled ? 'line-through' : 'none'}}>
                           {(b?.companyName || '—') + roundSuffix(m)}
                         </div>
                         {b?.contactName && <div style={{fontSize:12, color:'var(--ink-2)', marginTop:2}}>{b.contactName}{b.position ? ` · ${b.position}` : ''}</div>}
-                        {first && <div style={{fontSize:11.5, color:'var(--muted)', lineHeight:1.5, marginTop:4, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden'}}>{first}</div>}
+                        {first && <div style={{fontSize:11.5, color:'var(--muted)', lineHeight:1.5, marginTop: mobile ? 4 : 1, display:'-webkit-box', WebkitLineClamp: mobile ? 2 : 1, WebkitBoxOrient:'vertical', overflow:'hidden'}}>{first}</div>}
                       </div>
                     </div>
                   );
@@ -4465,7 +4482,23 @@ function MyMeetingsTab({state, update, me}){
               </div>
             </div>
           );
+          if (!desk2) return listEl;
+          // PC 2단: 왼쪽(고정) 날짜 버튼·상담실적지·추가 실적 안내 · 오른쪽 미팅 목록
+          return (
+            <div style={{display:'grid', gridTemplateColumns:'280px minmax(0, 1fr)', gap:20, alignItems:'start', marginTop:18}}>
+              <div style={{position:'sticky', top:16, display:'flex', flexDirection:'column', gap:10}}>
+                {renderDateTabs(true)}
+                {renderNotice(true)}
+              </div>
+              {listEl}
+            </div>
+          );
         })() : (<>
+        {MOBILE_LIST_PROJECTS.includes(project) && (
+          <div style={{marginBottom:10}}>
+            <button className="btn btn-ghost" onClick={() => setViewAll(false)} style={{fontSize:12, padding:'5px 10px'}}>← 내 미팅만 보기</button>
+          </div>
+        )}
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, fontSize:12, color:'var(--muted)'}}>
           <div>
             <span className="mono tabular" style={{color:'var(--ink)', fontWeight:600}}>{filledCount}</span> / {slots.length} 슬롯 편성 ·
@@ -4532,7 +4565,9 @@ function MyMeetingsTab({state, update, me}){
                   return (
                     <tr key={time}>
                       <td className="mono tabular" style={{fontSize:12.5, fontWeight:500, color: ms.length > 0 ? 'var(--ink)' : 'var(--muted)', verticalAlign:'top', paddingTop:12}}>
-                        {time}
+                        {slotLabelOf(config, selectedDate, time)
+                          ? <span style={{fontFamily:'inherit', fontSize:11.5, fontWeight:700, color:'#4C1D95', lineHeight:1.25, display:'block'}}>{slotLabelOf(config, selectedDate, time)}</span>
+                          : time}
                       </td>
                       <td style={{padding:6}}>
                         <div style={{display:'flex', flexDirection:'column', gap:6}}>
