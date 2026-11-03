@@ -1033,6 +1033,10 @@ function eventNow(project) {
   } catch { return { date: '', hm: '' }; }
 }
 
+// 참가사별 일정표(인쇄)에서 이름 뒤에 '(변동 가능성 있음)'을 붙일 바이어 — 운영사무국 요청 (11/3)
+const PRINT_UNCERTAIN_BUYERS = ['39 Weeks', 'Disruptors League'];
+const isPrintUncertainBuyer = b => { const k = v => String(v || '').toLowerCase().replace(/[^a-z0-9가-힣]/g, ''); return !!b && PRINT_UNCERTAIN_BUYERS.some(n => k(n) === k(b.companyName)); };
+
 // 추가 실적 제출 안내 (CANADA) — 인쇄용 일정표 하단·참가사 화면에 표시
 const EXTRA_RESULT_NOTICE = {
   title: 'RSVP·eDM으로 온 연락도 실적입니다 — 추가 제출 요청',
@@ -1306,11 +1310,14 @@ function buildDailySheetsHtml({ project, config, date, exhibitors, meetings, buy
     const label = m => slotLabelOf(config, date, slotKeyOf(m.time));
     const rangeOf = m => label(m) || `${m.time}–${addMinutesToTime(m.time, meetingDuration(m))}`;
     const chipOf = m => label(m) || m.time;
-    const nameOf = m => { const b = buyerOf(m.buyerId); return (b?.companyName || '(바이어 미지정)') + roundSuffix(m) + (m.status === 'tentative' ? ' (조율중)' : ''); };
+    // 변동 가능성 표시는 HTML로 붙임 (작은 빨간 글씨) — nameOf는 글자만, nameHtml은 표시 포함
+    const uncHtml = m => isPrintUncertainBuyer(buyerOf(m.buyerId)) ? ' <span class="unc">(변동 가능성 있음)</span>' : '';
+    // 인쇄물에는 '(조율중)'을 붙이지 않음 (변동 표시는 '(변동 가능성 있음)'으로 통일)
+    const nameOf = m => { const b = buyerOf(m.buyerId); return (b?.companyName || '(바이어 미지정)') + roundSuffix(m); };
     const grid = hours.map(h => {
       const inHour = ms.filter(m => parseInt(m.time, 10) === h);
       return `<div class="hcell${inHour.length ? ' on' : ''}"><div class="hh">${h}시</div>${inHour.map(m =>
-        `<div class="chip${label(m) ? ' sm' : ''}">${htmlEsc(chipOf(m))}</div><div class="bn">${htmlEsc(nameOf(m))}</div>`).join('')}</div>`;
+        `<div class="chip${label(m) ? ' sm' : ''}">${htmlEsc(chipOf(m))}</div><div class="bn">${htmlEsc(nameOf(m))}${isPrintUncertainBuyer(buyerOf(m.buyerId)) ? '<div class="unc">(변동 가능성 있음)</div>' : ''}</div>`).join('')}</div>`;
     }).join('');
     // 세 번째 칸 제목: 담당자가 모두 있으면 '담당자', 하나도 없으면 '회사소개', 섞여 있으면 '담당자 / 회사소개'
     const nContact = ms.filter(m => String(buyerOf(m.buyerId)?.contactName || '').trim()).length;
@@ -1325,7 +1332,7 @@ function buildDailySheetsHtml({ project, config, date, exhibitors, meetings, buy
       // 담당자가 있으면 담당자, 비어 있으면 회사소개(첫 문장)
       const contact = String(b?.contactName || '').trim();
       const third = contact ? `<td class="ct">${htmlEsc(contact)}${b?.position ? `<div class="pos">${htmlEsc(b.position)}</div>` : ''}</td>` : `<td class="intro">${htmlEsc(intro)}</td>`;
-      return `<tr><td class="t">${htmlEsc(rangeOf(m))}</td><td class="bn2">${htmlEsc(nameOf(m))}</td>${third}</tr>`;
+      return `<tr><td class="t">${htmlEsc(rangeOf(m))}</td><td class="bn2">${htmlEsc(nameOf(m))}${uncHtml(m)}</td>${third}</tr>`;
     }).join('') : `<tr><td colspan="3" class="empty">이 날 편성된 미팅이 없습니다.</td></tr>`;
     return `<section class="page">
   <div class="top"><b>2026 K-Animation · 현장 비즈니스 미팅 스케줄</b><span>${htmlEsc(config.label)}</span></div>
@@ -1333,7 +1340,7 @@ function buildDailySheetsHtml({ project, config, date, exhibitors, meetings, buy
   <div class="dbar"><b>${dateKo}</b> <span class="dow">(${dowKo})</span> · 총 ${ms.length}건</div>
   <div class="cap">하루 시간표</div>
   <div class="grid" style="grid-template-columns:repeat(${hours.length},1fr)">${grid}</div>
-  <table><thead><tr><th style="width:15%">시간</th><th style="width:24%">바이어 회사</th><th>${thirdHead}</th></tr></thead><tbody>${rows}</tbody></table>
+  <table><thead><tr><th style="width:15%">시간</th><th style="width:27%">바이어 회사</th><th>${thirdHead}</th></tr></thead><tbody>${rows}</tbody></table>
   ${EXTRA_RESULT_NOTICE ? `<div class="notice"><b>📌 ${htmlEsc(EXTRA_RESULT_NOTICE.title)}</b><div>${htmlEsc(EXTRA_RESULT_NOTICE.body)}</div><div class="ni">기재 항목: ${htmlEsc(EXTRA_RESULT_NOTICE.items)}</div></div>` : ''}
   <div class="foot">발행일 ${issued} · K-Animation 운영사무국 — 변경사항은 운영데스크로 문의</div>
 </section>`;
@@ -1349,23 +1356,26 @@ body { margin: 0; font-family: 'Pretendard','Apple SD Gothic Neo','Malgun Gothic
 .page { width: 210mm; min-height: 297mm; margin: 16px auto; background: #fff; padding: 12mm 12mm 14mm; position: relative; box-shadow: 0 2px 12px rgba(0,0,0,.12); display: flex; flex-direction: column; }
 .top { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 3px solid #111; padding-bottom: 6px; font-size: 13px; }
 .top b { font-size: 15px; } .top span { color: #555; }
-h1 { font-size: 28px; margin: 14px 0 10px; letter-spacing: -0.02em; }
+h1 { font-size: 26px; margin: 10px 0 8px; letter-spacing: -0.02em; }
 h1 small { font-size: 13px; font-weight: 400; color: #777; margin-left: 8px; letter-spacing: 0; }
 .dbar { background: #F1F1F4; border-left: 7px solid ${accent}; padding: 9px 16px; font-size: 23px; }
 .dbar .dow { font-size: 18px; color: #666; }
-.cap { margin: 12px 0 5px; font-size: 13px; font-weight: 700; color: #444; }
+.warn { margin-top: 5px; padding: 4px 10px; background: #FEF2F2; border: 1px solid #FCA5A5; border-radius: 5px; font-size: 11.5px; font-weight: 700; color: #B91C1C; }
+.cap { margin: 10px 0 5px; font-size: 13px; font-weight: 700; color: #444; }
 .grid { display: grid; border: 1px solid #DDD; }
-.hcell { border-right: 1px solid #DDD; padding: 6px 4px 8px; text-align: center; min-height: 80px; }
+.hcell { border-right: 1px solid #DDD; padding: 5px 4px 6px; text-align: center; min-height: 70px; }
 .hcell:last-child { border-right: 0; } .hcell.on { background: #F5F0FF; }
 .hh { font-size: 12px; color: #888; margin-bottom: 4px; }
 .chip { display: inline-block; background: #FEF3C7; color: #92400E; font-weight: 800; font-size: 15px; padding: 1px 6px; border-radius: 3px; margin-top: 4px; }
 .chip.sm { font-size: 10.5px; font-weight: 700; padding: 1px 5px; }
 .bn { font-size: 11.5px; font-weight: 700; color: #3B2A84; line-height: 1.3; margin-top: 2px; word-break: keep-all; }
-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 14px; }
+table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
 th { text-align: left; font-size: 13px; color: #555; font-weight: 600; background: #F7F7F9; padding: 10px 12px; border-bottom: 2px solid #CCC; }
 td { padding: 6px 10px; border-bottom: 1px solid #DDD; vertical-align: top; word-break: keep-all; }
 td.t { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 13.5px; }
 td.bn2 { font-size: 13.5px; font-weight: 600; }
+.unc { color: #DC2626; font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+.bn .unc { font-size: 9.5px; }
 td.intro { font-size: 10.5px; line-height: 1.5; color: #374151; }
 td.ct { font-size: 13.5px; } td.ct .pos { font-size: 11px; color: #6B7280; margin-top: 2px; }
 tr { break-inside: avoid; page-break-inside: avoid; }
