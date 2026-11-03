@@ -1033,6 +1033,10 @@ function eventNow(project) {
   } catch { return { date: '', hm: '' }; }
 }
 
+// 참가사별 일정표(인쇄)에서 이름 뒤에 '(변동 가능성 있음)'을 붙일 바이어 — 운영사무국 요청 (11/3)
+const PRINT_UNCERTAIN_BUYERS = ['39 Weeks', 'Disruptors League'];
+const isPrintUncertainBuyer = b => { const k = v => String(v || '').toLowerCase().replace(/[^a-z0-9가-힣]/g, ''); return !!b && PRINT_UNCERTAIN_BUYERS.some(n => k(n) === k(b.companyName)); };
+
 // 추가 실적 제출 안내 (CANADA) — 인쇄용 일정표 하단·참가사 화면에 표시
 const EXTRA_RESULT_NOTICE = {
   title: 'RSVP·eDM으로 온 연락도 실적입니다 — 추가 제출 요청',
@@ -1306,11 +1310,13 @@ function buildDailySheetsHtml({ project, config, date, exhibitors, meetings, buy
     const label = m => slotLabelOf(config, date, slotKeyOf(m.time));
     const rangeOf = m => label(m) || `${m.time}–${addMinutesToTime(m.time, meetingDuration(m))}`;
     const chipOf = m => label(m) || m.time;
+    // 변동 가능성 표시는 HTML로 붙임 (작은 빨간 글씨) — nameOf는 글자만, nameHtml은 표시 포함
+    const uncHtml = m => isPrintUncertainBuyer(buyerOf(m.buyerId)) ? ' <span class="unc">(변동 가능성 있음)</span>' : '';
     const nameOf = m => { const b = buyerOf(m.buyerId); return (b?.companyName || '(바이어 미지정)') + roundSuffix(m) + (m.status === 'tentative' ? ' (조율중)' : ''); };
     const grid = hours.map(h => {
       const inHour = ms.filter(m => parseInt(m.time, 10) === h);
       return `<div class="hcell${inHour.length ? ' on' : ''}"><div class="hh">${h}시</div>${inHour.map(m =>
-        `<div class="chip${label(m) ? ' sm' : ''}">${htmlEsc(chipOf(m))}</div><div class="bn">${htmlEsc(nameOf(m))}</div>`).join('')}</div>`;
+        `<div class="chip${label(m) ? ' sm' : ''}">${htmlEsc(chipOf(m))}</div><div class="bn">${htmlEsc(nameOf(m))}${isPrintUncertainBuyer(buyerOf(m.buyerId)) ? '<div class="unc">(변동 가능성 있음)</div>' : ''}</div>`).join('')}</div>`;
     }).join('');
     // 세 번째 칸 제목: 담당자가 모두 있으면 '담당자', 하나도 없으면 '회사소개', 섞여 있으면 '담당자 / 회사소개'
     const nContact = ms.filter(m => String(buyerOf(m.buyerId)?.contactName || '').trim()).length;
@@ -1325,7 +1331,7 @@ function buildDailySheetsHtml({ project, config, date, exhibitors, meetings, buy
       // 담당자가 있으면 담당자, 비어 있으면 회사소개(첫 문장)
       const contact = String(b?.contactName || '').trim();
       const third = contact ? `<td class="ct">${htmlEsc(contact)}${b?.position ? `<div class="pos">${htmlEsc(b.position)}</div>` : ''}</td>` : `<td class="intro">${htmlEsc(intro)}</td>`;
-      return `<tr><td class="t">${htmlEsc(rangeOf(m))}</td><td class="bn2">${htmlEsc(nameOf(m))}</td>${third}</tr>`;
+      return `<tr><td class="t">${htmlEsc(rangeOf(m))}</td><td class="bn2">${htmlEsc(nameOf(m))}${uncHtml(m)}</td>${third}</tr>`;
     }).join('') : `<tr><td colspan="3" class="empty">이 날 편성된 미팅이 없습니다.</td></tr>`;
     return `<section class="page">
   <div class="top"><b>2026 K-Animation · 현장 비즈니스 미팅 스케줄</b><span>${htmlEsc(config.label)}</span></div>
@@ -1334,7 +1340,7 @@ function buildDailySheetsHtml({ project, config, date, exhibitors, meetings, buy
   <div class="warn">⚠ 미팅 변동 가능성 있음 <span style="font-weight:500">— 현장 상황에 따라 미팅 시간·바이어가 바뀔 수 있습니다. 최신 일정은 플랫폼 '미팅 스케줄'에서 확인해 주세요.</span></div>
   <div class="cap">하루 시간표</div>
   <div class="grid" style="grid-template-columns:repeat(${hours.length},1fr)">${grid}</div>
-  <table><thead><tr><th style="width:15%">시간</th><th style="width:24%">바이어 회사</th><th>${thirdHead}</th></tr></thead><tbody>${rows}</tbody></table>
+  <table><thead><tr><th style="width:15%">시간</th><th style="width:27%">바이어 회사</th><th>${thirdHead}</th></tr></thead><tbody>${rows}</tbody></table>
   ${EXTRA_RESULT_NOTICE ? `<div class="notice"><b>📌 ${htmlEsc(EXTRA_RESULT_NOTICE.title)}</b><div>${htmlEsc(EXTRA_RESULT_NOTICE.body)}</div><div class="ni">기재 항목: ${htmlEsc(EXTRA_RESULT_NOTICE.items)}</div></div>` : ''}
   <div class="foot">발행일 ${issued} · K-Animation 운영사무국 — 변경사항은 운영데스크로 문의</div>
 </section>`;
@@ -1368,6 +1374,8 @@ th { text-align: left; font-size: 13px; color: #555; font-weight: 600; backgroun
 td { padding: 6px 10px; border-bottom: 1px solid #DDD; vertical-align: top; word-break: keep-all; }
 td.t { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 13.5px; }
 td.bn2 { font-size: 13.5px; font-weight: 600; }
+.unc { color: #DC2626; font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+.bn .unc { font-size: 9.5px; }
 td.intro { font-size: 10.5px; line-height: 1.5; color: #374151; }
 td.ct { font-size: 13.5px; } td.ct .pos { font-size: 11px; color: #6B7280; margin-top: 2px; }
 tr { break-inside: avoid; page-break-inside: avoid; }
