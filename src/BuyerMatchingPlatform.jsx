@@ -1338,7 +1338,6 @@ function buildDailySheetsHtml({ project, config, date, exhibitors, meetings, buy
   <div class="top"><b>2026 K-Animation · 현장 비즈니스 미팅 스케줄</b><span>${htmlEsc(config.label)}</span></div>
   <h1>${htmlEsc(ex.companyName)} <small>Booth ${idx + 1}${ex.companyNameEn ? ' · ' + htmlEsc(ex.companyNameEn) : ''}</small></h1>
   <div class="dbar"><b>${dateKo}</b> <span class="dow">(${dowKo})</span> · 총 ${ms.length}건</div>
-  <div class="warn">⚠ 미팅 변동 가능성 있음 <span style="font-weight:500">— 현장 상황에 따라 미팅 시간·바이어가 바뀔 수 있습니다. 최신 일정은 플랫폼 '미팅 스케줄'에서 확인해 주세요.</span></div>
   <div class="cap">하루 시간표</div>
   <div class="grid" style="grid-template-columns:repeat(${hours.length},1fr)">${grid}</div>
   <table><thead><tr><th style="width:15%">시간</th><th style="width:27%">바이어 회사</th><th>${thirdHead}</th></tr></thead><tbody>${rows}</tbody></table>
