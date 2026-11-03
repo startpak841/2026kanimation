@@ -1010,6 +1010,36 @@ async function recordExhibitorVisit(exhibitorId) {
   } catch {}
 }
 
+// ============================ 참가사 휴대폰 화면 (CANADA) ============================
+const MOBILE_LIST_PROJECTS = ['CANADA'];
+const EVENT_TZ = { CANADA: 'America/Toronto' };
+function useIsMobile(max = 640) {
+  const q = `(max-width: ${max}px)`;
+  const [m, setM] = useState(() => { try { return window.matchMedia(q).matches; } catch { return false; } });
+  useEffect(() => {
+    let mq; try { mq = window.matchMedia(q); } catch { return; }
+    const on = () => setM(mq.matches);
+    mq.addEventListener ? mq.addEventListener('change', on) : mq.addListener(on);
+    return () => { mq.removeEventListener ? mq.removeEventListener('change', on) : mq.removeListener(on); };
+  }, [q]);
+  return m;
+}
+// 행사지 현재 날짜·시각 (예: 토론토) → { date:'2026-11-03', hm:'13:45' }
+function eventNow(project) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: EVENT_TZ[project] || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date());
+    const g = t => parts.find(p => p.type === t)?.value;
+    return { date: `${g('year')}-${g('month')}-${g('day')}`, hm: `${g('hour') === '24' ? '00' : g('hour')}:${g('minute')}` };
+  } catch { return { date: '', hm: '' }; }
+}
+
+// 추가 실적 제출 안내 (CANADA) — 인쇄용 일정표 하단·참가사 화면에 표시
+const EXTRA_RESULT_NOTICE = {
+  title: 'RSVP·eDM으로 온 연락도 실적입니다 — 추가 제출 요청',
+  body: '현지 미팅이 아니더라도 RSVP·eDM·웹사이트를 보고 연락 온 바이어, 메일·화상 미팅 등 온라인 상담 건은 기존에 제공한 상담실적지에 함께 작성하시거나 운영사무국에 공유해 주세요. 행사 후 연락 온 건도 포함됩니다.',
+  items: '회사명·담당자·직급 / 이메일·연락처 / 논의 내용·관심 협력 분야',
+};
+
 // 미팅 회차 표시 (예: Aux Mode (1), (2)) — CANADA 미팅 창에서 지정, 바이어명 뒤에 붙여 표시
 function roundSuffix(m) { const r = Number(m?.round); return r === 1 || r === 2 ? ` (${r})` : ''; }
 // 바이어 회사소개 ↔ 미팅 메모 연동 행사
@@ -1145,12 +1175,12 @@ function buildScheduleWorkbookFiles({ project, config, exhibitors, meetings, buy
     for (const t of slots) {
       const end = addMinutesToTime(t, config.slotMinutes || 30);
       const blocked = getBlockedSlot(project, d.date, t);
-      const label = slotLabelOf(config, d.date, t);   // 이름 붙은 칸(Networking Lunch)은 합계에서 제외 — 팀 시간표 기준
+      const label = slotLabelOf(config, d.date, t);   // 이름 붙은 칸(Networking Lunch) — 시간 대신 이름 표시, 합계에는 포함
       const cells = exhibitors.map((e, i) => {
         const ms = active.filter(m => m.exhibitorId === e.id && m.date === d.date && slotKeyOf(m.time) === t)
           .sort((a, b) => String(a.time).localeCompare(String(b.time)));
-        if (!label) colCount[i] += ms.length;
-        else lunchCount += ms.length;
+        colCount[i] += ms.length;              // Networking Lunch 미팅도 합계에 포함 (플랫폼·팀 시트 기준과 동일)
+        if (label) lunchCount += ms.length;
         if (!ms.length && blocked) return { v: blocked.title, s: S.total };
         return { v: ms.map(m => meetingCellText(m, buyerOf(m.buyerId))).join('\n'), s: ms.length ? cellStyleOf(ms) : S.body };
       });
@@ -1160,7 +1190,7 @@ function buildScheduleWorkbookFiles({ project, config, exhibitors, meetings, buy
     const last = 3 + slots.length;
     const sum = colCount.reduce((a, b) => a + b, 0);
     // 합계는 맨 아래 줄 하나만 (참가사별 건수, 전체 건수는 맨 앞 칸에 함께 표시)
-    if (lunchCount) totalSuffix.push(`${dateShort(d.date)} Networking Lunch ${lunchCount}건`);
+    if (lunchCount) totalSuffix.push(`${dateShort(d.date)} Networking Lunch ${lunchCount}건`);   // 합계에 포함된 점심 미팅 수 안내
     const totalRow = [{ v: `Total (${sum})`, s: S.total }, ...colCount.map(c => ({ v: c, s: S.total }))];   // 15분 미팅 2건이 한 칸에 있을 수 있어 수식 대신 실제 건수
     rows.push(totalRow); heights.push(24);
     exhibitors.forEach((e, i) => { (perDay[e.id] = perDay[e.id] || {})[d.date] = colCount[i]; });
@@ -1189,7 +1219,7 @@ function buildScheduleWorkbookFiles({ project, config, exhibitors, meetings, buy
                         : exhibitors.reduce((a, e) => a + (perDay[e.id]?.[dates[k - 1].date] || 0), 0);
       return { v: { f: `SUM(${col}${r0}:${col}${r1})`, v }, s: S.total };
     })]); heights.push(24);
-    rows.push([]); rows.push([{ v: `Exported ${new Date().toLocaleString('ko-KR')} · 노란 칸 = 운영사무국 편성 · 취소된 미팅 제외 · [TBC] = 미확정${totalSuffix.length ? ` · 합계 제외: ${totalSuffix.join(', ')}` : ''}`, s: 0 }]);
+    rows.push([]); rows.push([{ v: `Exported ${new Date().toLocaleString('ko-KR')} · 노란 칸 = 운영사무국 편성 · 취소된 미팅 제외 · [TBC] = 미확정${totalSuffix.length ? ` · 합계에 포함: ${totalSuffix.join(', ')}` : ''}`, s: 0 }]);
     sheets.unshift({ name: 'Summary', xml: sheetXml({ rows, heights, widths: [11, 34, 10, ...dates.map(() => 10)], merges: [`A1:${xlColName(ncol - 1)}1`], freeze: [0, 2] }) });
   }
 
@@ -1304,6 +1334,7 @@ function buildDailySheetsHtml({ project, config, date, exhibitors, meetings, buy
   <div class="cap">하루 시간표</div>
   <div class="grid" style="grid-template-columns:repeat(${hours.length},1fr)">${grid}</div>
   <table><thead><tr><th style="width:15%">시간</th><th style="width:24%">바이어 회사</th><th>${thirdHead}</th></tr></thead><tbody>${rows}</tbody></table>
+  ${EXTRA_RESULT_NOTICE ? `<div class="notice"><b>📌 ${htmlEsc(EXTRA_RESULT_NOTICE.title)}</b><div>${htmlEsc(EXTRA_RESULT_NOTICE.body)}</div><div class="ni">기재 항목: ${htmlEsc(EXTRA_RESULT_NOTICE.items)}</div></div>` : ''}
   <div class="foot">발행일 ${issued} · K-Animation 운영사무국 — 변경사항은 운영데스크로 문의</div>
 </section>`;
   }).join('\n');
@@ -1318,13 +1349,13 @@ body { margin: 0; font-family: 'Pretendard','Apple SD Gothic Neo','Malgun Gothic
 .page { width: 210mm; min-height: 297mm; margin: 16px auto; background: #fff; padding: 12mm 12mm 14mm; position: relative; box-shadow: 0 2px 12px rgba(0,0,0,.12); display: flex; flex-direction: column; }
 .top { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 3px solid #111; padding-bottom: 6px; font-size: 13px; }
 .top b { font-size: 15px; } .top span { color: #555; }
-h1 { font-size: 30px; margin: 18px 0 14px; letter-spacing: -0.02em; }
+h1 { font-size: 28px; margin: 14px 0 10px; letter-spacing: -0.02em; }
 h1 small { font-size: 13px; font-weight: 400; color: #777; margin-left: 8px; letter-spacing: 0; }
-.dbar { background: #F1F1F4; border-left: 7px solid ${accent}; padding: 12px 18px; font-size: 25px; }
+.dbar { background: #F1F1F4; border-left: 7px solid ${accent}; padding: 9px 16px; font-size: 23px; }
 .dbar .dow { font-size: 18px; color: #666; }
-.cap { margin: 16px 0 6px; font-size: 13px; font-weight: 700; color: #444; }
+.cap { margin: 12px 0 5px; font-size: 13px; font-weight: 700; color: #444; }
 .grid { display: grid; border: 1px solid #DDD; }
-.hcell { border-right: 1px solid #DDD; padding: 8px 4px 10px; text-align: center; min-height: 92px; }
+.hcell { border-right: 1px solid #DDD; padding: 6px 4px 8px; text-align: center; min-height: 80px; }
 .hcell:last-child { border-right: 0; } .hcell.on { background: #F5F0FF; }
 .hh { font-size: 12px; color: #888; margin-bottom: 4px; }
 .chip { display: inline-block; background: #FEF3C7; color: #92400E; font-weight: 800; font-size: 15px; padding: 1px 6px; border-radius: 3px; margin-top: 4px; }
@@ -1332,14 +1363,16 @@ h1 small { font-size: 13px; font-weight: 400; color: #777; margin-left: 8px; let
 .bn { font-size: 11.5px; font-weight: 700; color: #3B2A84; line-height: 1.3; margin-top: 2px; word-break: keep-all; }
 table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 14px; }
 th { text-align: left; font-size: 13px; color: #555; font-weight: 600; background: #F7F7F9; padding: 10px 12px; border-bottom: 2px solid #CCC; }
-td { padding: 8px 10px; border-bottom: 1px solid #DDD; vertical-align: top; word-break: keep-all; }
+td { padding: 6px 10px; border-bottom: 1px solid #DDD; vertical-align: top; word-break: keep-all; }
 td.t { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 13.5px; }
 td.bn2 { font-size: 13.5px; font-weight: 600; }
 td.intro { font-size: 10.5px; line-height: 1.5; color: #374151; }
 td.ct { font-size: 13.5px; } td.ct .pos { font-size: 11px; color: #6B7280; margin-top: 2px; }
 tr { break-inside: avoid; page-break-inside: avoid; }
 td.empty { text-align: center; color: #888; padding: 30px; }
-.foot { margin-top: auto; padding-top: 14px; border-top: 1px solid #DDD; text-align: center; font-size: 11px; color: #888; }
+.notice { margin-top: auto; border: 1.5px solid #E879F9; background: #FDF4FF; border-radius: 6px; padding: 7px 11px; font-size: 10px; line-height: 1.5; color: #3B0764; }
+.notice b { display: block; font-size: 11.5px; margin-bottom: 2px; color: #86198F; } .notice .ni { color: #6B21A8; margin-top: 2px; }
+.foot { margin-top: 6px; padding-top: 6px; border-top: 1px solid #DDD; text-align: center; font-size: 10.5px; color: #888; }
 @media print { body { background: #fff; } .bar { display: none; } .page { margin: 0; box-shadow: none; width: auto; min-height: calc(297mm - 26mm); padding: 0; page-break-after: always; break-after: page; } .page:last-child { page-break-after: auto; break-after: auto; } }
 </style></head><body>
 <div class="bar"><span>${dateKo}(${dowKo}) · 참가사 ${exhibitors.length}곳 · 한 장에 한 참가사 — [인쇄 / PDF 저장]을 누른 뒤 대상에서 'PDF로 저장'을 고르세요</span><button onclick="window.print()">인쇄 / PDF 저장</button></div>
@@ -4133,6 +4166,17 @@ function MyMeetingsTab({state, update, me}){
 
   useEffect(() => { setSelectedDate(config.dates[0]?.date || ''); }, [project]);
 
+  // 휴대폰(CANADA): 내 미팅만 카드로 보여주고, 행사 당일이면 오늘 날짜를 먼저 엶
+  const isMobile = useIsMobile();
+  const mobile = isMobile && MOBILE_LIST_PROJECTS.includes(project);
+  const [nowTick, setNowTick] = useState(0);
+  useEffect(() => { if (!mobile) return; const t = setInterval(() => setNowTick(x => x + 1), 60000); return () => clearInterval(t); }, [mobile]);
+  useEffect(() => {
+    if (!mobile) return;
+    const today = eventNow(project).date;
+    if (config.dates.some(d => d.date === today)) setSelectedDate(today);
+  }, [mobile, project]);
+
   // 본인 미팅만 필터
   const myMeetings = state.meetings.filter(m => m.exhibitorId === me.id);
   const myMeetingsForDate = myMeetings.filter(m => m.date === selectedDate);
@@ -4299,8 +4343,8 @@ function MyMeetingsTab({state, update, me}){
       <SectionHeader eyebrow="SECTION 06" title="비즈니스 미팅 스케줄"
         desc={`${config.label} 기간 중 본인의 미팅 스케줄입니다. 관리자가 편성한 미팅은 자동 반영되며, 빈 슬롯은 본인이 직접 바이어를 선택해 채울 수 있습니다. 본인이 편성한 미팅만 수정/삭제 가능합니다.`}/>
 
-      {/* 권한 안내 박스 */}
-      <div style={{marginTop:20, display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
+      {/* 권한 안내 박스 (휴대폰에서는 숨김) */}
+      <div style={{marginTop:20, display: mobile ? 'none' : 'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
         <div style={{padding:16, background:'var(--ivory-2)', borderLeft:`3px solid ${projectColor(project).bg}`, borderRadius:'var(--radius-sm)'}}>
           <div className="mono" style={{fontSize:10, letterSpacing:'0.15em', color:'var(--muted)', marginBottom:6}}>SELF-SCHEDULED</div>
           <div style={{fontSize:12.5, lineHeight:1.6, color:'var(--ink)'}}>
@@ -4322,12 +4366,13 @@ function MyMeetingsTab({state, update, me}){
       ) : (
       <>
         {/* 날짜 탭 */}
-        <div style={{display:'flex', gap:6, marginTop:22, marginBottom:14, overflowX:'auto', paddingBottom:2}}>
+        <div style={{display:'flex', gap:6, marginTop:22, marginBottom:14, overflowX: mobile ? 'visible' : 'auto', flexWrap: mobile ? 'wrap' : 'nowrap', paddingBottom:2}}>
           {config.dates.map(d => {
             const active = selectedDate === d.date;
             const cnt = myMeetings.filter(m => m.date === d.date).length;
             return (
               <button key={d.date} onClick={()=>setSelectedDate(d.date)} style={{
+                ...(mobile ? { flex:'1 1 0' } : {}),
                 padding:'10px 16px', borderRadius:'var(--radius-sm)', cursor:'pointer',
                 border: active ? '1px solid var(--ink)' : '1px solid var(--line)',
                 background: active ? 'var(--ink)' : 'var(--paper)',
@@ -4347,12 +4392,80 @@ function MyMeetingsTab({state, update, me}){
               border:'1px solid #16A34A', background:'#F0FDF4', color:'#166534',
               fontFamily:'inherit', fontSize:13, fontWeight:600, whiteSpace:'nowrap',
               display:'inline-flex', alignItems:'center', gap:8, minWidth:112,
+              ...(mobile ? { flexBasis:'100%', justifyContent:'center' } : {}),
             }}>
               <Download size={15}/> 상담실적지 양식 다운로드
             </button>
           )}
         </div>
 
+        {CONSULT_FORM_PROJECTS.includes(project) && (
+          <div style={{margin:'0 0 14px', padding: mobile ? '10px 12px' : '12px 16px', borderRadius:8, background:'#FDF4FF', border:'1px solid #F0ABFC', fontSize: mobile ? 12 : 12.5, lineHeight:1.6, color:'#3B0764'}}>
+            <div style={{fontWeight:700, color:'#86198F', marginBottom:2}}>📌 {EXTRA_RESULT_NOTICE.title}</div>
+            {EXTRA_RESULT_NOTICE.body}
+            <div style={{color:'#6B21A8', marginTop:3, fontSize: mobile ? 11.5 : 12}}>기재 항목: {EXTRA_RESULT_NOTICE.items}</div>
+          </div>
+        )}
+
+        {mobile ? (() => {
+          // ── 휴대폰: 내 미팅 카드 목록 (빈 시간·추가 버튼 없이 시간순) ──
+          void nowTick;
+          const nowE = eventNow(project);
+          const isToday = nowE.date === selectedDate;
+          const list = [...myMeetingsForDate].sort((a, b) => String(a.time).localeCompare(String(b.time)));
+          const endOf = m => addMinutesToTime(m.time, meetingDuration(m));
+          const cur = isToday ? list.find(m => m.time <= nowE.hm && nowE.hm < endOf(m) && m.status !== 'cancelled') : null;
+          const next = isToday ? list.find(m => m.time > nowE.hm && m.status !== 'cancelled') : null;
+          return (
+            <div>
+              <div style={{fontSize:13, color:'var(--muted)', margin:'2px 2px 10px'}}>
+                <b style={{color:'var(--ink)', fontSize:15}}>{isToday ? '오늘 ' : ''}내 미팅 {list.filter(m => m.status !== 'cancelled').length}건</b>
+                <span style={{marginLeft:6}}>· 눌러서 바이어 정보 보기</span>
+              </div>
+              {list.length === 0 && <div className="card" style={{padding:28, textAlign:'center', color:'var(--muted)', fontSize:13.5}}>이 날 편성된 미팅이 없습니다.</div>}
+              <div style={{display:'flex', flexDirection:'column', gap:8}}>
+                {list.map(m => {
+                  const b = getBuyer(m.buyerId);
+                  const lbl = slotLabelOf(config, selectedDate, slotKeyOf(m.time));
+                  const isCur = cur && cur.id === m.id, isNext = !cur && next && next.id === m.id;
+                  const cancelled = m.status === 'cancelled';
+                  const memo = String(m.notes || '').trim();
+                  const first = (/^(.+?(?:함|음|임|됨|있음|다)\.)(\s|$)/.exec(memo) || [])[1] || memo;
+                  return (
+                    <div key={m.id} onClick={() => openEdit(m)} style={{
+                      display:'flex', gap:12, padding:'12px 14px', borderRadius:10, cursor:'pointer',
+                      background: isCur ? '#FEF3C7' : 'var(--paper)',
+                      border: isCur ? '2px solid #F59E0B' : isNext ? '2px solid #8B5CF6' : '1px solid var(--line)',
+                      opacity: cancelled ? 0.5 : 1,
+                    }}>
+                      <div style={{flexShrink:0, width:62, textAlign:'left'}}>
+                        {lbl
+                          ? <div style={{fontSize:12, fontWeight:700, color:'#4C1D95', lineHeight:1.25}}>{lbl}</div>
+                          : <>
+                              <div className="mono tabular" style={{fontSize:17, fontWeight:700, color:'var(--ink)', lineHeight:1.1}}>{m.time}</div>
+                              <div className="mono tabular" style={{fontSize:11, color:'var(--muted)', marginTop:2}}>~{endOf(m)}</div>
+                            </>}
+                      </div>
+                      <div style={{flex:1, minWidth:0}}>
+                        <div style={{display:'flex', alignItems:'center', gap:6, flexWrap:'wrap'}}>
+                          {isCur && <span style={{fontSize:10.5, fontWeight:700, color:'#fff', background:'#F59E0B', borderRadius:999, padding:'1px 8px'}}>지금</span>}
+                          {isNext && <span style={{fontSize:10.5, fontWeight:700, color:'#fff', background:'#8B5CF6', borderRadius:999, padding:'1px 8px'}}>다음</span>}
+                          {m.status === 'tentative' && <span style={{fontSize:10.5, fontWeight:700, color:'#1F2937', background:'#FDE68A', borderRadius:999, padding:'1px 8px'}}>조율중</span>}
+                          {cancelled && <span style={{fontSize:10.5, fontWeight:700, color:'#fff', background:'#DC2626', borderRadius:999, padding:'1px 8px'}}>취소</span>}
+                        </div>
+                        <div style={{fontSize:15.5, fontWeight:700, color:'var(--ink)', lineHeight:1.3, wordBreak:'break-word', marginTop:(isCur||isNext||cancelled||m.status==='tentative') ? 4 : 0, textDecoration: cancelled ? 'line-through' : 'none'}}>
+                          {(b?.companyName || '—') + roundSuffix(m)}
+                        </div>
+                        {b?.contactName && <div style={{fontSize:12, color:'var(--ink-2)', marginTop:2}}>{b.contactName}{b.position ? ` · ${b.position}` : ''}</div>}
+                        {first && <div style={{fontSize:11.5, color:'var(--muted)', lineHeight:1.5, marginTop:4, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden'}}>{first}</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })() : (<>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, fontSize:12, color:'var(--muted)'}}>
           <div>
             <span className="mono tabular" style={{color:'var(--ink)', fontWeight:600}}>{filledCount}</span> / {slots.length} 슬롯 편성 ·
@@ -4508,6 +4621,7 @@ function MyMeetingsTab({state, update, me}){
             </table>
           </div>
         </div>
+        </>)}
       </>
       )}
 
