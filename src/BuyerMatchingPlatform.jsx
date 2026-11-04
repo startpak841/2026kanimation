@@ -108,6 +108,22 @@ function isSuspiciousEmptyState(state) {
     && (state.buyers || []).length === 0;
 }
 
+// 이번 수정(prev → next)이 해당 행사(project)의 참가사·미팅·바이어를 건드리는지 판단
+function touchesProject(prev, next, project) {
+  const exIds = new Set([...(prev.exhibitors || []), ...(next.exhibitors || [])].filter(e => e && e.project === project).map(e => e.id));
+  const diff = (a, b, hit) => {
+    if (a === b) return false;
+    const am = new Map((a || []).map(x => [x.id, x]));
+    const bm = new Map((b || []).map(x => [x.id, x]));
+    for (const [id, x] of bm) { const o = am.get(id); if (o !== x && (hit(x) || (o && hit(o)))) return true; }
+    for (const [id, o] of am) { if (!bm.has(id) && hit(o)) return true; }
+    return false;
+  };
+  return diff(prev.meetings, next.meetings, m => exIds.has(m.exhibitorId))
+      || diff(prev.buyers, next.buyers, b => b.project === project)
+      || diff(prev.exhibitors, next.exhibitors, e => e.project === project);
+}
+
 async function saveState(state) {
   if (isSuspiciousEmptyState(state)) {
     console.error('[saveState] 비어 있는 상태 저장을 차단했습니다.');
@@ -2349,6 +2365,8 @@ export default function BuyerMatchingPlatform() {
   const [auth, setAuth] = useState(() => loadAuthFromStorage()); // {role:'exhibitor'|'admin', userId?}
   const [syncIndicator, setSyncIndicator] = useState(null); // 동기화 피드백 UI
   const [loadError, setLoadError] = useState(null); // [안전장치] 데이터 읽기 실패 시 오류 표시 (저장하지 않음)
+  const stateRef = useRef(null);                    // 최신 state (CANADA 저장 시 사용)
+  const saveQueueRef = useRef(Promise.resolve());   // CANADA 저장 순서 보장
 
   useEffect(() => {
     loadState().then(setState).catch(err => setLoadError(err?.message || String(err)));
@@ -2434,7 +2452,30 @@ export default function BuyerMatchingPlatform() {
   };
   const exitProxy = () => setAuth(auth?.proxyAdmin || null);
 
+  // [CANADA 동시 수정 보호] 캐나다 데이터(참가사·미팅·바이어)를 바꾸는 저장은
+  //  · 저장 직전에 서버 최신본을 다시 읽어 그 위에 이번 수정만 적용 (다른 사람이 방금 고친 내용을 덮어쓰지 않음)
+  //  · 여러 저장이 겹치면 한 건씩 순서대로 처리
+  //  MIPCOM·MIFA만 바꾸는 저장은 기존 방식 그대로.
+  stateRef.current = state;
   const update = (fn) => {
+    const base0 = stateRef.current;
+    let probe = null;
+    try { probe = base0 ? fn(base0) : null; } catch { probe = null; }
+    if (base0 && probe && touchesProject(base0, probe, 'CANADA')) {
+      setState(prev => (prev ? clApply(prev, fn(prev), logActor) : prev)); // 화면은 즉시 반영
+      saveQueueRef.current = saveQueueRef.current.then(async () => {
+        let base = null;
+        try {
+          const r = await window.storage.get(DB_KEY);
+          if (r && r.value) { const p = JSON.parse(r.value); if (p && Array.isArray(p.exhibitors)) base = p; }
+        } catch { base = null; }
+        if (!base) { await saveState(stateRef.current); return; } // 서버 읽기 실패 시 기존 방식으로 저장
+        const next = clApply(base, fn(base), logActor);
+        await saveState(next);
+        setState(next);
+      }).catch(err => console.error('[update] 저장 실패', err));
+      return;
+    }
     setState(prev => {
       const rawNext = fn(prev);
       const next = clApply(prev, rawNext, logActor);  // 참가사 변경분 자동 로그 기록 (작성자 포함)
@@ -7054,6 +7095,9 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
       _categoriesText: b ? buyerCategoryLabels(b).join(' / ') : '',
       // 메모가 바이어 회사소개와 같으면 '자동 메모'로 취급 → 바이어(회사명)를 바꾸면 메모도 따라 바뀜
       _autoNotes: b && String(m.notes || '').trim() && String(m.notes || '').trim() === String(b.interestedProducts || '').trim() ? String(m.notes || '').trim() : '',
+      // CANADA 동시 수정 보호: 창을 열 때의 값 — 저장 시 '실제로 고친 칸'만 반영하는 기준
+      _contactInit: { contactName: b?.contactName || '', position: b?.position || '', email: b?.email || '', phone: b?.phone || '' },
+      _meetingInit: { ...m },
     });
   };
 
@@ -7088,6 +7132,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
       _country: b.country || '',
       _categories: buyerCategoryLabels(b),
       _categoriesText: buyerCategoryLabels(b).join(' / '),
+      _contactInit: { contactName: b.contactName || '', position: b.position || '', email: b.email || '', phone: b.phone || '' },
       // 미팅 메모: 바이어 DB '관심 품목 / 주요 사업'(회사소개)을 자동 입력. 직접 쓴 메모가 있으면 덮어쓰지 않음
       ...((() => {
         const intro = String(b.interestedProducts || '').trim();
@@ -7103,6 +7148,41 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
     if (readOnly) return;
     if (!modalData.exhibitorId) { alert('참가사를 선택해주세요.'); return; }
     if (!(modalData._companyName || '').trim()) { alert('바이어 회사명을 입력해주세요.'); return; }
+
+    // CANADA: 담당자 정보를 고친 바이어가 다른 참가사 미팅에도 연결돼 있으면, 함께 바뀐다는 것을 저장 전에 확인
+    if (autocompleteOn) {
+      let tid = modalData.buyerId;
+      if (tid && modalData._linkSource === 'existing') {
+        const cur0 = fullState.buyers.find(b => b.id === tid);
+        if (cur0 && normBuyerName(cur0.companyName) !== normBuyerName(modalData._companyName)) tid = null;
+      }
+      let linkedByName = false;
+      if (!tid) {
+        const hit = buildBuyerOptions(fullState.buyers, subProject).find(o => o.key === normBuyerName(modalData._companyName));
+        if (hit) { tid = hit.buyerId; linkedByName = true; }
+      }
+      const tb = tid ? fullState.buyers.find(b => b.id === tid) : null;
+      if (tb) {
+        const init = (!linkedByName && modalData._contactInit) || {};
+        const FIELDS = [['contactName','담당자'],['position','직책'],['email','이메일'],['phone','전화']];
+        const changed = FIELDS.filter(([f]) => {
+          const v = String(modalData['_' + f] || '').trim();
+          if (linkedByName && !v) return false;                       // 자동 연결 시 빈 칸은 기존 값 유지
+          if (!linkedByName && v === String(init[f] || '').trim()) return false; // 고치지 않은 칸
+          return v !== String(tb[f] || '').trim();
+        });
+        const others = fullState.meetings.filter(m => m.buyerId === tid && m.id !== modalData.id && m.status !== 'cancelled');
+        if (changed.length && others.length) {
+          const exName = id => { const e = fullState.exhibitors.find(x => x.id === id); return e ? (e.companyName || e.companyNameEn || id) : id; };
+          const list = others.slice().sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
+            .map(m => `• ${String(m.date).slice(5).replace('-', '/')} ${m.time} ${exName(m.exhibitorId)}`).join('\n');
+          const ok = confirm(
+            `"${tb.companyName}"은(는) 다른 미팅 ${others.length}건에도 연결된 바이어입니다.\n${list}\n\n` +
+            `${changed.map(([, l]) => l).join('·')} 정보를 바꾸면 위 미팅에도 모두 함께 바뀝니다.\n계속 저장할까요? (취소하면 저장하지 않고 창으로 돌아갑니다)`);
+          if (!ok) return;
+        }
+      }
+    }
 
     update(s => {
       let buyers = s.buyers;
@@ -7122,6 +7202,15 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
       const parseCats = t => String(t || '').split(/[\/,·]/).map(x => x.trim()).filter(Boolean);
       // 자동 연결 시: 입력한 값만 반영하고 빈 칸은 기존 바이어 값 유지 (기존 담당자 정보를 지우지 않음)
       const keepIfBlank = (v, old) => autoLinked && !String(v || '').trim() ? old : v;
+      // CANADA: 창을 연 뒤 고치지 않은 칸은 서버 최신 값을 유지 (그 사이 다른 사람이 고친 담당자 정보를 되돌리지 않음).
+      //  단, 최신 값이 비어 있으면 폼 값으로 채움.
+      const contactVal = (f, v, old) => {
+        const init = modalData._contactInit;
+        if (autocompleteOn && !autoLinked && init && String(v || '').trim() === String(init[f] || '').trim()) {
+          return String(old || '').trim() ? old : v;
+        }
+        return keepIfBlank(v, old);
+      };
 
       if (!buyerId) {
         // 등록 바이어를 고르지 않은 경우에만 신규 바이어 생성 (새 미팅·수정 공통)
@@ -7153,10 +7242,10 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
         buyers = s.buyers.map(b => b.id === buyerId ? {
           ...b,
           companyName: autoLinked ? b.companyName : modalData._companyName.trim(),
-          contactName: keepIfBlank(modalData._contactName, b.contactName),
-          position: keepIfBlank(modalData._position, b.position),
-          email: keepIfBlank(modalData._email, b.email),
-          phone: keepIfBlank(modalData._phone, b.phone),
+          contactName: contactVal('contactName', modalData._contactName, b.contactName),
+          position: contactVal('position', modalData._position, b.position),
+          email: contactVal('email', modalData._email, b.email),
+          phone: contactVal('phone', modalData._phone, b.phone),
           ...(modalData._linkSource === 'pick' && !String(b.country || '').trim() && modalData._country ? { country: modalData._country } : {}),
           ...(modalData._linkSource === 'pick' && !buyerCategoryLabels(b).length && (modalData._categories || []).length ? { categories: modalData._categories } : {}),
           // CANADA: 국가·분류 칸에 입력한 값이 있으면 반영 (빈 칸이면 기존 값 유지)
@@ -7203,6 +7292,20 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
           : b);
         return {...s, buyers: buyersFinal, meetings: [...s.meetings, newMeeting]};
       } else {
+        // CANADA: 창을 연 뒤 고친 항목만 반영 — 그 사이 다른 사람이 옮기거나 바꾼 항목(시간·참가사·상태·메모 등)은 최신 값 유지
+        const mInit = modalData._meetingInit;
+        const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+        const changedOnly = (cur, fields) => {
+          if (!autocompleteOn || !mInit) return fields;
+          const out = {};
+          Object.keys(fields).forEach(k => {
+            if (k === 'duration') { if (meetingDuration({ ...mInit, duration: fields[k] }) !== meetingDuration(mInit)) out[k] = fields[k]; return; }
+            if (k === 'notes') { if (String(fields[k] || '').trim() !== String(mInit.notes || '').trim()) out[k] = fields[k]; return; }
+            if (k === 'table' || k === 'round') { if (!same(fields[k] || null, mInit[k] || null)) out[k] = fields[k]; return; }
+            if (!same(fields[k], mInit[k])) out[k] = fields[k];
+          });
+          return out;
+        };
         // 편집: 미팅 + 바이어 confirmed 정보 동시 업데이트
         const buyersFinal = buyers.map(b => b.id === buyerId
           ? {...b, confirmedDate: modalData.date, confirmedTime: modalData.time, confirmedExhibitorId: modalData.exhibitorId}
@@ -7210,7 +7313,7 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
         return {
           ...s, buyers: buyersFinal,
           meetings: s.meetings.map(m => m.id === modalData.id
-            ? {...m, ...meetingFields,
+            ? {...m, ...changedOnly(m, meetingFields),
                // 주체 버튼을 실제로 바꾼 경우에만 source 변경 (그 외 기존 출처·색 보존)
                ...(arrangeEnabled && modalData.arrangedBy !== modalData._arrangedByInit ? {source: sourceFromArrange} : {})}
             : m)
