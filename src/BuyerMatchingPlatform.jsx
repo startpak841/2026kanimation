@@ -124,6 +124,69 @@ function touchesProject(prev, next, project) {
       || diff(prev.exhibitors, next.exhibitors, e => e.project === project);
 }
 
+// ============================ 미팅 변경 이력 (CANADA) ============================
+// 미팅 추가·이동·수정·취소·삭제를 저장하는 순간 state.meetingLogs에 함께 기록 (저장과 기록이 한 번에 묶임 → 기록 누락 없음)
+const MEETING_LOG_PROJECTS = ['CANADA'];
+function mlSnap(m, s) {
+  const ex = (s.exhibitors || []).find(e => e.id === m.exhibitorId);
+  const b = (s.buyers || []).find(x => x.id === m.buyerId);
+  return {
+    date: m.date || '', time: m.time || '', exhibitorId: m.exhibitorId || '',
+    exhibitor: ex ? (ex.companyName || ex.companyNameEn || m.exhibitorId) : (m.exhibitorId || ''),
+    buyerId: m.buyerId || '', buyer: b ? (b.companyName || m.buyerId) : (m.buyerId || ''),
+    status: m.status || '', duration: m.duration || 30, round: m.round || null,
+    notes: String(m.notes || ''), source: m.source || '',
+  };
+}
+const ML_STATUS = { confirmed: '확정', tentative: '미정', cancelled: '취소', completed: '완료', pending: '대기' };
+function meetingLogEntries(prev, next, project, actor) {
+  const exIds = new Set([...(prev.exhibitors || []), ...(next.exhibitors || [])].filter(e => e && e.project === project).map(e => e.id));
+  const pm = new Map((prev.meetings || []).map(m => [m.id, m]));
+  const nm = new Map((next.meetings || []).map(m => [m.id, m]));
+  const ts = new Date().toISOString();
+  const out = [];
+  const mk = (type, id, before, after, changes) => out.push({
+    id: `ML-${Date.now().toString(36)}-${out.length}-${Math.random().toString(36).slice(2, 6)}`,
+    ts, actor, project, type, meetingId: id, before, after, changes,
+  });
+  for (const [id, m] of nm) {
+    const o = pm.get(id);
+    if (!exIds.has(m.exhibitorId) && !(o && exIds.has(o.exhibitorId))) continue;
+    if (!o) { mk('추가', id, null, mlSnap(m, next), []); continue; }
+    if (o === m) continue;
+    const a = mlSnap(o, prev), b = mlSnap(m, next);
+    const ch = [];
+    if (a.date !== b.date) ch.push({ label: '일자', from: a.date, to: b.date });
+    if (a.time !== b.time) ch.push({ label: '시간', from: a.time, to: b.time });
+    if (a.exhibitorId !== b.exhibitorId) ch.push({ label: '참가사', from: a.exhibitor, to: b.exhibitor });
+    if (a.buyerId !== b.buyerId) ch.push({ label: '바이어', from: a.buyer, to: b.buyer });
+    if (a.status !== b.status) ch.push({ label: '상태', from: ML_STATUS[a.status] || a.status, to: ML_STATUS[b.status] || b.status });
+    if (a.duration !== b.duration) ch.push({ label: '소요시간', from: a.duration + '분', to: b.duration + '분' });
+    if ((a.round || null) !== (b.round || null)) ch.push({ label: '회차', from: a.round ? `(${a.round})` : '없음', to: b.round ? `(${b.round})` : '없음' });
+    if (a.source !== b.source) ch.push({ label: '편성 주체', from: a.source, to: b.source });
+    if (a.notes.trim() !== b.notes.trim()) ch.push({ label: '메모', from: a.notes.slice(0, 60), to: b.notes.slice(0, 60) });
+    if (!ch.length) continue;
+    const L = new Set(ch.map(c => c.label));
+    const type = (L.has('일자') || L.has('시간') || L.has('참가사')) ? '이동'
+      : L.has('바이어') ? '바이어 변경'
+      : (L.has('상태') && b.status === 'cancelled') ? '취소'
+      : L.has('상태') ? '상태 변경' : '수정';
+    mk(type, id, a, b, ch);
+  }
+  for (const [id, o] of pm) {
+    if (nm.has(id) || !exIds.has(o.exhibitorId)) continue;
+    mk('삭제', id, mlSnap(o, prev), null, []);
+  }
+  return out;
+}
+function withMeetingLogs(prev, next, actor) {
+  if (!prev || !next || !Array.isArray(next.meetings)) return next;
+  let entries = [];
+  MEETING_LOG_PROJECTS.forEach(p => { entries = entries.concat(meetingLogEntries(prev, next, p, actor)); });
+  if (!entries.length) return next;
+  return { ...next, meetingLogs: [...(Array.isArray(next.meetingLogs) ? next.meetingLogs : []), ...entries] };
+}
+
 async function saveState(state) {
   if (isSuspiciousEmptyState(state)) {
     console.error('[saveState] 비어 있는 상태 저장을 차단했습니다.');
@@ -2457,12 +2520,16 @@ export default function BuyerMatchingPlatform() {
   //  · 여러 저장이 겹치면 한 건씩 순서대로 처리
   //  MIPCOM·MIFA만 바꾸는 저장은 기존 방식 그대로.
   stateRef.current = state;
+  // 미팅 변경 이력 작성자: 관리자 / 관리자(대리 입력) / 참가사 · 회사명
+  const mlActor = auth?.role === 'exhibitor' && !isProxy
+    ? `참가사 · ${((state?.exhibitors || []).find(e => e.id === auth.userId) || {}).companyName || auth.userId}`
+    : isProxy ? '관리자(대리 입력)' : '관리자';
   const update = (fn) => {
     const base0 = stateRef.current;
     let probe = null;
     try { probe = base0 ? fn(base0) : null; } catch { probe = null; }
     if (base0 && probe && touchesProject(base0, probe, 'CANADA')) {
-      setState(prev => (prev ? clApply(prev, fn(prev), logActor) : prev)); // 화면은 즉시 반영
+      setState(prev => (prev ? withMeetingLogs(prev, clApply(prev, fn(prev), logActor), mlActor) : prev)); // 화면은 즉시 반영
       saveQueueRef.current = saveQueueRef.current.then(async () => {
         let base = null;
         try {
@@ -2470,7 +2537,7 @@ export default function BuyerMatchingPlatform() {
           if (r && r.value) { const p = JSON.parse(r.value); if (p && Array.isArray(p.exhibitors)) base = p; }
         } catch { base = null; }
         if (!base) { await saveState(stateRef.current); return; } // 서버 읽기 실패 시 기존 방식으로 저장
-        const next = clApply(base, fn(base), logActor);
+        const next = withMeetingLogs(base, clApply(base, fn(base), logActor), mlActor);
         await saveState(next);
         setState(next);
       }).catch(err => console.error('[update] 저장 실패', err));
@@ -6924,6 +6991,118 @@ function BuyerCompanyAutocomplete({ value, options, onType, onPick, disabled, pl
   );
 }
 
+// 미팅 변경 이력 패널 (CANADA 스케줄 화면) — 최신순, 날짜 필터, 엑셀 내려받기
+const ML_TYPE_COLOR = {
+  '추가': ['#DCFCE7', '#166534'], '삭제': ['#FEE2E2', '#991B1B'], '취소': ['#FEE2E2', '#991B1B'],
+  '이동': ['#DBEAFE', '#1E40AF'], '바이어 변경': ['#FEF3C7', '#92400E'], '상태 변경': ['#EDE9FE', '#5B21B6'], '수정': ['#F3F4F6', '#374151'],
+};
+function mlLocalTime(ts) {
+  try {
+    const d = new Date(ts);
+    const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Toronto', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(d);
+    const g = t => (p.find(x => x.type === t) || {}).value || '';
+    return `${g('month')}/${g('day')} ${g('hour') === '24' ? '00' : g('hour')}:${g('minute')}`;
+  } catch { return String(ts || '').slice(5, 16).replace('T', ' '); }
+}
+function mlShort(name) {
+  return String(name || '').replace(/^\(주\)|^주식회사\s*|\(주\)$|㈜/g, '').trim();
+}
+function mlWhere(x) { return x ? `${mlShort(x.exhibitor)} ${String(x.date).slice(5).replace('-', '/')} ${x.time}` : ''; }
+function mlSummary(l) {
+  if (l.type === '추가') return `${mlWhere(l.after)} · ${l.after.buyer}`;
+  if (l.type === '삭제') return `${mlWhere(l.before)} · ${l.before.buyer}`;
+  if (l.type === '이동' || l.type === '바이어 변경') return `${mlWhere(l.before)} ${l.before.buyer} → ${mlWhere(l.after)} ${l.after.buyer}`;
+  return `${mlWhere(l.after || l.before)} · ${(l.after || l.before).buyer}`;
+}
+function mlDetail(l) {
+  return (l.changes || []).filter(c => l.type === '이동' || l.type === '바이어 변경' ? !['일자','시간','참가사','바이어'].includes(c.label) : true)
+    .map(c => `${c.label}: ${c.from || '—'} → ${c.to || '—'}`).join(' / ');
+}
+function exportMeetingLogsXlsx(logs) {
+  const head = ['변경 시각(토론토)', '구분', '수정한 사람', '미팅번호', '변경 전 참가사', '변경 전 일시', '변경 전 바이어', '변경 후 참가사', '변경 후 일시', '변경 후 바이어', '세부 변경', '비고'];
+  const rows = logs.slice().sort((a, b) => String(a.ts).localeCompare(String(b.ts))).map(l => [
+    mlLocalTime(l.ts), l.type, l.actor, l.meetingId,
+    l.before ? l.before.exhibitor : '', l.before ? `${l.before.date} ${l.before.time}` : '', l.before ? l.before.buyer : '',
+    l.after ? l.after.exhibitor : '', l.after ? `${l.after.date} ${l.after.time}` : '', l.after ? l.after.buyer : '',
+    (l.changes || []).map(c => `${c.label}: ${c.from || '—'} → ${c.to || '—'}`).join('\n'), l.note || '',
+  ]);
+  const ws = XLSX.utils.aoa_to_sheet([head, ...rows]);
+  ws['!cols'] = [16, 10, 18, 10, 22, 16, 28, 22, 16, 28, 48, 30].map(w => ({ wch: w }));
+  ws['!freeze'] = { xSplit: 0, ySplit: 1 };
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '미팅 변경 이력');
+  XLSX.writeFile(wb, `CANADA_미팅_변경이력_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+function MeetingLogPanel({ logs, selectedDate }) {
+  const [open, setOpen] = useState(false);
+  const [onlyDate, setOnlyDate] = useState(true);
+  const [limit, setLimit] = useState(30);
+  const all = (logs || []).slice().sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
+  const touches = l => [l.before, l.after].some(x => x && x.date === selectedDate);
+  const list = onlyDate ? all.filter(touches) : all;
+  const last = all[0];
+  return (
+    <div className="card" style={{ marginBottom: 14, padding: 0, overflow: 'hidden', border: '1px solid #C7D2FE' }}>
+      <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', cursor: 'pointer', background: '#EEF2FF' }}>
+        <span style={{ fontWeight: 700, fontSize: 13, color: '#3730A3' }}>{open ? '▾' : '▸'} 미팅 변경 이력</span>
+        <span className="mono tabular" style={{ fontSize: 11.5, color: '#4338CA' }}>{String(selectedDate).slice(5).replace('-', '/')} {all.filter(touches).length}건 · 전체 {all.length}건</span>
+        {last && !open && (
+          <span style={{ fontSize: 12, color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
+            최근: {mlLocalTime(last.ts)} {last.actor} · [{last.type}] {mlSummary(last)}
+          </span>
+        )}
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
+          {all.length > 0 && (
+            <button onClick={() => { try { exportMeetingLogsXlsx(all); } catch (e) { alert('엑셀 파일을 만들지 못했습니다.\n' + (e?.message || e)); } }}
+              style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #16A34A', background: '#F0FDF4', color: '#166534', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <Download size={13} /> 이력 엑셀
+            </button>
+          )}
+        </span>
+      </div>
+      {open && (
+        <div style={{ padding: '8px 14px 12px' }}>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8, fontSize: 12 }}>
+            {[[true, `${String(selectedDate).slice(5).replace('-', '/')} 미팅만`], [false, '전체 일자']].map(([v, label]) => (
+              <button key={label} onClick={() => setOnlyDate(v)} style={{ padding: '4px 10px', borderRadius: 999, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, border: '1px solid ' + (onlyDate === v ? '#4338CA' : 'var(--line)'), background: onlyDate === v ? '#4338CA' : 'var(--paper)', color: onlyDate === v ? '#fff' : 'var(--ink-2)' }}>{label}</button>
+            ))}
+            <span style={{ marginLeft: 'auto', color: 'var(--muted)', fontSize: 11.5, alignSelf: 'center' }}>미팅을 저장할 때마다 자동 기록 · 최신순</span>
+          </div>
+          {list.length === 0 ? (
+            <div style={{ padding: '14px 0', color: 'var(--muted)', fontSize: 12.5 }}>아직 기록된 변경이 없습니다.</div>
+          ) : (
+            <div style={{ maxHeight: 340, overflowY: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                <tbody>
+                  {list.slice(0, limit).map(l => {
+                    const [bg, fg] = ML_TYPE_COLOR[l.type] || ML_TYPE_COLOR['수정'];
+                    const det = mlDetail(l);
+                    return (
+                      <tr key={l.id} style={{ borderTop: '1px solid var(--line-2)' }}>
+                        <td className="mono tabular" style={{ padding: '7px 8px 7px 0', whiteSpace: 'nowrap', color: 'var(--muted)', verticalAlign: 'top', width: 86 }}>{mlLocalTime(l.ts)}</td>
+                        <td style={{ padding: '7px 8px', whiteSpace: 'nowrap', verticalAlign: 'top', width: 70 }}>
+                          <span style={{ padding: '2px 8px', borderRadius: 999, background: bg, color: fg, fontWeight: 700, fontSize: 11.5 }}>{l.type}</span>
+                        </td>
+                        <td style={{ padding: '7px 8px', verticalAlign: 'top' }}>
+                          <div style={{ color: 'var(--ink)' }}>{mlSummary(l)}</div>
+                          {det && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2 }}>{det}</div>}
+                          {l.note && <div style={{ fontSize: 11, color: '#92400E', marginTop: 2 }}>{l.note}</div>}
+                        </td>
+                        <td style={{ padding: '7px 0 7px 8px', whiteSpace: 'nowrap', verticalAlign: 'top', color: 'var(--ink-2)', textAlign: 'right' }}>{l.actor}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {list.length > limit && <button onClick={() => setLimit(x => x + 50)} style={{ marginTop: 8, padding: '5px 12px', fontSize: 12, borderRadius: 6, border: '1px solid var(--line)', background: 'var(--paper)', cursor: 'pointer', fontFamily: 'inherit' }}>더 보기 ({list.length - limit}건)</button>}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminScheduleTab({state, fullState, update, project, readOnly}){
   // 스케줄 탭 행사 순서: MIPCOM → CANADA → MIFA (표시 순서만, 데이터 무관)
   const projects = ['MIPCOM','CANADA','MIFA'];
@@ -7509,6 +7688,10 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
               </button>
             )}
           </div>
+
+          {MEETING_LOG_PROJECTS.includes(subProject) && !readOnly && (
+            <MeetingLogPanel logs={(fullState.meetingLogs || []).filter(l => l.project === subProject)} selectedDate={selectedDate} />
+          )}
 
           {exhibitorsInProject.length === 0 ? (
             <div className="card" style={{padding:48, textAlign:'center', color:'var(--muted)', fontSize:13.5}}>
