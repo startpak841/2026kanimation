@@ -1237,6 +1237,12 @@ function buildScheduleWorkbookFiles({ project, config, exhibitors, meetings, buy
   };
 
   const sheets = [];
+  // 행사 기간(일자 탭) 밖의 상담 = 추가 실적 (RSVP·eDM 등으로 따로 진행한 온라인 상담 포함) — 합계에 포함
+  const eventDates = new Set(dates.map(d => d.date));
+  const exIds = new Set(exhibitors.map(e => e.id));
+  const extra = active.filter(m => exIds.has(m.exhibitorId) && !eventDates.has(m.date))
+    .sort((a, b) => (String(a.date) + String(a.time)).localeCompare(String(b.date) + String(b.time)));
+  const extraCount = id => extra.filter(m => m.exhibitorId === id).length;
   const totalSuffix = [];   // 합계 제외 안내 (예: Nov 3 Networking Lunch 4건)
   const perDay = {}; // exId → {date: count}
 
@@ -1286,24 +1292,40 @@ function buildScheduleWorkbookFiles({ project, config, exhibitors, meetings, buy
   // ── 요약 시트 (부스번호·회사명·Total·일자별 건수)
   {
     const rows = [], heights = [];
-    const ncol = 3 + dates.length;
+    const hasExtra = extra.length > 0;
+    const ncol = 3 + dates.length + (hasExtra ? 1 : 0);
     rows.push([{ v: `${config.label}\nBusiness Meeting Summary`, s: S.title }]); heights.push(52);
-    rows.push([{ v: 'Booth No.', s: S.head }, { v: 'Company Name', s: S.head }, { v: 'Total', s: S.head }, ...dates.map(d => ({ v: dateShort(d.date), s: S.head }))]); heights.push(26);
+    rows.push([{ v: 'Booth No.', s: S.head }, { v: 'Company Name', s: S.head }, { v: 'Total', s: S.head }, ...dates.map(d => ({ v: dateShort(d.date), s: S.head })), ...(hasExtra ? [{ v: '추가 실적\n(행사 외)', s: S.head }] : [])]); heights.push(hasExtra ? 34 : 26);
     exhibitors.forEach((e, i) => {
-      const per = dates.map(d => perDay[e.id]?.[d.date] || 0);
+      const per = [...dates.map(d => perDay[e.id]?.[d.date] || 0), ...(hasExtra ? [extraCount(e.id)] : [])];
       const r = i + 3;
       rows.push([{ v: i + 1, s: S.booth }, { v: exName(e), s: S.body }, { v: { f: `SUM(D${r}:${xlColName(ncol - 1)}${r})`, v: per.reduce((a, b) => a + b, 0) }, s: S.total }, ...per.map(c => ({ v: c, s: S.body }))]);
       heights.push(24);
     });
     const r0 = 3, r1 = 2 + exhibitors.length;
-    rows.push([{ v: 'Total', s: S.total }, { v: '', s: S.total }, ...Array.from({ length: 1 + dates.length }, (_, k) => {
+    rows.push([{ v: 'Total', s: S.total }, { v: '', s: S.total }, ...Array.from({ length: ncol - 2 }, (_, k) => {
       const col = xlColName(2 + k);
-      const v = k === 0 ? exhibitors.reduce((a, e) => a + dates.reduce((x, d) => x + (perDay[e.id]?.[d.date] || 0), 0), 0)
-                        : exhibitors.reduce((a, e) => a + (perDay[e.id]?.[dates[k - 1].date] || 0), 0);
+      const v = k === 0 ? exhibitors.reduce((a, e) => a + dates.reduce((x, d) => x + (perDay[e.id]?.[d.date] || 0), 0) + extraCount(e.id), 0)
+                        : k <= dates.length ? exhibitors.reduce((a, e) => a + (perDay[e.id]?.[dates[k - 1].date] || 0), 0)
+                        : extra.length;
       return { v: { f: `SUM(${col}${r0}:${col}${r1})`, v }, s: S.total };
     })]); heights.push(24);
-    rows.push([]); rows.push([{ v: `Exported ${new Date().toLocaleString('ko-KR')} · 노란 칸 = 운영사무국 편성 · 취소된 미팅 제외 · [TBC] = 미확정${totalSuffix.length ? ` · 합계에 포함: ${totalSuffix.join(', ')}` : ''}`, s: 0 }]);
-    sheets.unshift({ name: 'Summary', xml: sheetXml({ rows, heights, widths: [11, 34, 10, ...dates.map(() => 10)], merges: [`A1:${xlColName(ncol - 1)}1`], freeze: [0, 2] }) });
+    rows.push([]); rows.push([{ v: `Exported ${new Date().toLocaleString('ko-KR')} · 노란 칸 = 운영사무국 편성 · 취소된 미팅 제외 · [TBC] = 미확정${totalSuffix.length ? ` · 합계에 포함: ${totalSuffix.join(', ')}` : ''}${hasExtra ? ` · 추가 실적 = 행사 기간 외 상담 ${extra.length}건(합계에 포함, 'Additional' 시트 참고)` : ''}`, s: 0 }]);
+    sheets.unshift({ name: 'Summary', xml: sheetXml({ rows, heights, widths: [11, 34, 10, ...dates.map(() => 10), ...(hasExtra ? [12] : [])], merges: [`A1:${xlColName(ncol - 1)}1`], freeze: [0, 2] }) });
+  }
+
+  if (extra.length) {
+    const rows = [], heights = [];
+    rows.push([{ v: `${config.label} · Additional Results (행사 기간 외 상담)`, s: S.title }]); heights.push(40);
+    rows.push(['No.', 'Date', 'Company', 'Buyer', 'Contact', 'Title', 'Email', 'Note'].map(v => ({ v, s: S.head }))); heights.push(26);
+    extra.forEach((m, i) => {
+      const e = exhibitors.find(x => x.id === m.exhibitorId), b = buyerOf(m.buyerId) || {};
+      rows.push([{ v: i + 1, s: S.booth }, { v: m.date, s: S.body }, { v: e ? exName(e) : m.exhibitorId, s: S.body }, { v: b.companyName || '', s: S.admin },
+        { v: b.contactName || '', s: S.body }, { v: b.position || '', s: S.body }, { v: b.email || '', s: S.body }, { v: String(m.notes || '').trim(), s: S.body }]);
+      heights.push(30);
+    });
+    rows.push([{ v: `Total (${extra.length})`, s: S.total }]); heights.push(24);
+    sheets.splice(1, 0, { name: 'Additional', xml: sheetXml({ rows, heights, widths: [7, 12, 26, 30, 24, 26, 32, 44], merges: ['A1:H1'], freeze: [0, 2] }) });
   }
 
   const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -1332,7 +1354,7 @@ function buildScheduleWorkbookFiles({ project, config, exhibitors, meetings, buy
     '_rels/.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
     'xl/workbook.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView activeTab="${sheets.length > 1 ? 1 : 0}"/></bookViews><sheets>${sheets.map((s, i) => `<sheet name="${xlEsc(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>`,
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView activeTab="${Math.max(0, sheets.findIndex(x => x.name !== 'Summary' && x.name !== 'Additional'))}"/></bookViews><sheets>${sheets.map((s, i) => `<sheet name="${xlEsc(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>`,
     'xl/_rels/workbook.xml.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((s, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
     'xl/styles.xml': styles,
@@ -7688,6 +7710,24 @@ function AdminScheduleTab({state, fullState, update, project, readOnly}){
               </button>
             )}
           </div>
+
+          {MEETING_LOG_PROJECTS.includes(subProject) && (() => {
+            // 행사 기간 외 추가 실적 (RSVP·eDM 등으로 따로 진행한 상담) — 스케줄 표에는 없지만 실적·엑셀 합계에 포함
+            const evDates = new Set((config.dates || []).map(d => d.date));
+            const exIdSet = new Set(exhibitorsInProject.map(e => e.id));
+            const extra = (fullState.meetings || []).filter(m => exIdSet.has(m.exhibitorId) && !evDates.has(m.date) && !MEETING_EXCLUDED_STATUSES.includes(String(m.status || '').toLowerCase()))
+              .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+            if (!extra.length) return null;
+            return (
+              <div className="card" style={{ marginBottom: 14, padding: '10px 14px', border: '1px solid #FDE68A', background: '#FFFBEB' }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: '#92400E', marginBottom: 6 }}>행사 기간 외 추가 실적 {extra.length}건 <span style={{ fontWeight: 400, fontSize: 11.5, color: '#A16207' }}>· 스케줄 표에는 없고, 엑셀 합계(Summary·Additional 시트)에 포함</span></div>
+                {extra.map(m => {
+                  const e = exhibitorsInProject.find(x => x.id === m.exhibitorId); const b = (fullState.buyers || []).find(x => x.id === m.buyerId) || {};
+                  return <div key={m.id} style={{ fontSize: 12.5, color: 'var(--ink-2)', padding: '2px 0' }}><span className="mono tabular">{String(m.date).slice(5).replace('-', '/')}</span> · {e ? (e.companyName || e.companyNameEn) : m.exhibitorId} · <b>{b.companyName || '(바이어 미지정)'}</b>{b.contactName ? ` (${b.contactName})` : ''}</div>;
+                })}
+              </div>
+            );
+          })()}
 
           {MEETING_LOG_PROJECTS.includes(subProject) && !readOnly && (
             <MeetingLogPanel logs={(fullState.meetingLogs || []).filter(l => l.project === subProject)} selectedDate={selectedDate} />
